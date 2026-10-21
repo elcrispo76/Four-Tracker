@@ -1,0 +1,25 @@
+FOUR TRACKER - HJEMMESIDE
+=========================
+
+Mappen indeholder hele hjemmesiden:
+  index.html                     selve siden
+  images\                        skærmbilleder og ikon
+  Four-Tracker-User-Manual.pdf   manualen
+
+1. Ret dine links
+   Åbn index.html i Notesblok og find blokken "Edit these links" nederst:
+     download: linket til installationsfilen (FourTracker-Setup-0.1.0-share.exe)
+     donate:   linket til din donationsside (Ko-fi, PayPal.me eller Buy Me a Coffee)
+   Skriv linkene mellem anførselstegnene og gem.
+
+2. Læg siden online (gratis), fx med GitHub:
+   a) Opret en gratis konto på github.com og et nyt "repository", fx four-tracker.
+   b) Upload filerne fra denne mappe (index.html, images, PDF'en).
+   c) Settings -> Pages -> Branch: main -> Save.
+      Siden ligger så på https://DIT-NAVN.github.io/four-tracker/
+   d) Installationsfilen: "Releases" -> "Create a new release" -> træk
+      FourTracker-Setup-0.1.0-share.exe ind -> Publish.
+      Download-linket bliver så:
+      https://github.com/DIT-NAVN/four-tracker/releases/latest/download/FourTracker-Setup-0.1.0-share.exe
+
+Del KUN share-installeren (uden VST2).
