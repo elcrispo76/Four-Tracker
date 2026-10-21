@@ -235,6 +235,21 @@ section { padding-block: 44px; }
 .donate h2 { font-family: var(--f-display); font-weight: 700; font-size: var(--step-2); letter-spacing: 0.03em; }
 .donate p { margin-top: 8px; color: var(--ink-soft); max-width: 58ch; }
 
+/* ---------- status ---------- */
+.status-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.status-card { padding: 22px; display: grid; gap: 12px; align-content: start; }
+.status-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 0.95rem; letter-spacing: 0.03em; }
+.status-card p { color: var(--ink-soft); }
+.stages { list-style: none; margin: 0; padding: 10px; display: grid; gap: 6px; background: var(--screen); border-radius: 4px; }
+.stages li { display: grid; grid-template-columns: 12ch 1fr; gap: 12px; align-items: baseline; padding: 8px 10px;
+             color: var(--screen-dim); font-size: var(--step--1); }
+.stages li b { font-family: var(--f-display); font-weight: 400; font-size: 0.78rem; letter-spacing: 0.05em; }
+.stages li.now { background: var(--red); color: var(--red-ink); }
+.stages li.done { color: var(--screen-text); }
+.badge { display: inline-block; font-family: var(--f-display); font-size: 0.72rem; letter-spacing: 0.06em;
+         padding: 2px 8px; background: var(--red); color: var(--red-ink); border-radius: 3px; vertical-align: middle; }
+@media (max-width: 480px) { .stages li { grid-template-columns: 1fr; gap: 2px; } }
+
 /* ---------- footer ---------- */
 footer { padding-block: 30px 40px; font-size: var(--step--1); color: var(--ink-soft); }
 footer .wrap { display: grid; gap: 8px; }
@@ -277,7 +292,7 @@ footer .wrap { display: grid; gap: 8px; }
         <p class="lede">A 4-channel sample tracker you play live: every key on your MIDI keyboard is a pattern.</p>
         <div class="actions">
           <a class="btn btn-red js-download" href="#download">
-            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.1.1</span></small></span>
+            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.2.0</span> beta</small></span>
           </a>
           <a class="btn btn-light js-donate" href="#donate">
             <span class="btn-text">DONATE<small>Keep it going</small></span>
@@ -340,7 +355,7 @@ footer .wrap { display: grid; gap: 8px; }
         <article class="panel feature">
           <span class="cell">WAV AIFF FLAC 8SVX</span>
           <h3>Your samples, old and new</h3>
-          <p>WAV, AIFF, FLAC, Ogg and MP3, plus Amiga IFF 8SVX and raw 8-bit samples straight off ProTracker and OctaMED disks. The built-in browser plays each sample as you arrow through the folder.</p>
+          <p>WAV, AIFF, FLAC, Ogg and MP3, plus Amiga IFF 8SVX and raw 8-bit samples straight off ProTracker and OctaMED disks. The built-in browser plays each sample as you arrow through the folder. Or make any slot a synth: sine, triangle, saw, square or noise, with ADSR and a resonant filter.</p>
         </article>
         <article class="panel feature">
           <span class="cell">S ▸ LOOP ◂ E</span>
@@ -386,14 +401,14 @@ footer .wrap { display: grid; gap: 8px; }
       </div>
       <div class="download-grid">
         <div class="panel dl-card">
-          <h3>FOUR TRACKER <span class="js-version">v0.1.1</span></h3>
+          <h3>FOUR TRACKER <span class="js-version">v0.2.0</span> <span class="badge">BETA</span></h3>
           <dl class="spec">
             <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
             <dt>Includes</dt><dd>Standalone app (ASIO, WASAPI), VST3 plugin 64-bit and 32-bit, user manual (PDF)</dd>
             <dt>Hosts</dt><dd>Any DAW that loads VST3 instruments</dd>
             <dt>Price</dt><dd>Free</dd>
           </dl>
-          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.1.1-share.exe</small></span></a></div>
+          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.2.0-share.exe</small></span></a></div>
           <p class="note">Windows may say "Windows protected your PC" because the installer isn't signed. Click <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
         <div class="panel dl-card">
@@ -401,6 +416,37 @@ footer .wrap { display: grid; gap: 8px; }
           <p>Getting started, the live keyboard, every page, the full effect list and keyboard shortcuts, in 12 pages.</p>
           <div><a class="btn btn-light js-manual" href="Four-Tracker-User-Manual.pdf"><span class="btn-text">READ THE MANUAL<small>PDF · English</small></span></a></div>
           <p class="note">First start: the app opens with a demo song and puts it in Documents\Four Tracker\Demo together with the demo samples.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="status">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>STATUS: BETA</h2>
+        <p>Four Tracker <span class="js-version">v0.2.0</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
+      </div>
+      <div class="status-grid">
+        <div class="panel status-card">
+          <h3>ROAD TO 1.0</h3>
+          <ol class="stages">
+            <li class="done"><b>ALPHA</b><span>Features still changing, things may break.</span></li>
+            <li class="now"><b>BETA ◂ NOW</b><span>Features in place, being tried by users. Bugs expected.</span></li>
+            <li><b>RELEASE CAND.</b><span>No new features, only bug fixes.</span></li>
+            <li><b>1.0 GOLD</b><span>Stable and reliable for everyday use and live sets.</span></li>
+          </ol>
+        </div>
+        <div class="panel status-card">
+          <h3>HOW IT WAS MADE</h3>
+          <p>Four Tracker is a one-person project, written with the help of an AI coding assistant (Claude). That is said openly here, because you should know what you are running.</p>
+          <p>Every version passes an automated test program before release. It plays patterns through MIDI, checks the live pattern switching, effects, the synth, sample formats, saving and loading, and the editor keys. Automated tests catch a lot, but they are not the same as many musicians using it for months. That is what the beta is for.</p>
+        </div>
+        <div class="panel status-card">
+          <h3>FOUND A BUG?</h3>
+          <p>Please report it, with the version number, what you did, and what happened. If you can, attach the module (.ftm).</p>
+          <div><a class="btn btn-light" href="https://github.com/elcrispo76/Four-Tracker/issues" target="_blank" rel="noopener"><span class="btn-text">REPORT A BUG<small>GitHub Issues</small></span></a></div>
+          <p class="note">Four Tracker is provided as is, without warranty of any kind. Don't rely on a beta for a gig without a backup.</p>
         </div>
       </div>
     </div>
@@ -429,10 +475,10 @@ footer .wrap { display: grid; gap: 8px; }
 <script>
 /* ===== Edit these links before you put the site online ===== */
 const SITE = {
-  version:  "0.1.1",
+  version:  "0.2.0",
   // Where the installer is hosted, e.g. a GitHub release:
-  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.1.1-share.exe"
-  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.1.1/FourTracker-Setup-0.1.1-share.exe",
+  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.2.0-share.exe"
+  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.2.0/FourTracker-Setup-0.2.0-share.exe",
   // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
   donate:   "https://ko-fi.com/fourtracker",
   donateLabel: "Any amount",
