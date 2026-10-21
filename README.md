@@ -32,6 +32,7 @@
 | `source/` | The program's source code, build scripts and installer script |
 | `source/BUILDING-AND-USAGE.md` | Keys, effect list, file formats, building and making the installer |
 | `CREDITS.md` | Third-party software and licences |
+| `CLONE-CHECK.md` | Check of the source against six open-source trackers for copied code |
 | `LICENSE` | GNU AGPLv3 |
 
 ## Building
