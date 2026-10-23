@@ -28,7 +28,7 @@ class TrackerEngine
 public:
     TrackerEngine();
 
-    void prepare (double sampleRate);
+    void prepare (double sampleRate, int maxBlockSize = 4096);
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, double hostBpm);
 
     // ---- control (any thread) ---------------------------------------------
@@ -52,7 +52,7 @@ public:
     void collectGarbage();
 
     // ---- song data -------------------------------------------------------
-    Pattern& getPattern (int i) noexcept { return patterns[(size_t) juce::jlimit (0, kMaxPatterns - 1, i)]; }
+    Pattern& getPattern (int i) noexcept { return (*patterns)[(size_t) juce::jlimit (0, kMaxPatterns - 1, i)]; }
 
     /** Take this while doing bulk changes to pattern data from the UI.
         The audio thread skips a block rather than wait for it. */
@@ -80,8 +80,21 @@ public:
     std::atomic<bool> midiLearn      { false };
     std::atomic<bool> respondToMidiStartStop { true };   // MIDI clock Start/Stop messages
     std::atomic<int>  masterVolume   { 80 };     // 0..100
+    std::atomic<int>  numChannels    { 4 };      // channels in use: 4, 8 or 16
 
     ChannelMix mix[kNumChannels];
+
+    /** Optional per-channel insert (VST effects in the FX build). When set,
+        each channel is rendered into its own stereo buffer, passed through
+        this callback on the audio thread, and then mixed. Set it before
+        audio starts. */
+    std::function<void (int channel, float* left, float* right, int numSamples)> channelInsert;
+    /** Optional chaining (with channelInsert): the channel whose effects this channel's sound
+        goes on into after its own, or -1 for straight out. Loops are ignored. */
+    std::function<int (int channel)> channelRoute;
+
+    /** MIDI out from MIDI instruments (filled by process(), read and cleared by the processor). */
+    juce::MidiBuffer midiOut;
 
 private:
     // extra snapshot slot after the 16 instruments, never reachable from patterns
@@ -119,11 +132,21 @@ private:
         bool  loopOnly = false;              // preview of the loop region only
 
         // synth instruments: ADSR envelope and resonant low-pass filter
+        int   slot = 0;                      // instrument slot, to follow live slider changes
+        float fCut = -1.0f, fRes = 0.0f;     // smoothed filter settings (0..127), -1 = not started
         int   envStage = 0;                  // 0 none, 1 attack, 2 decay, 3 sustain, 4 release
         float env = 1.0f, relStep = 0.0f;
+        float accentEnv = 0.0f;              // 1 at the note start, fades out (ACCENT)
         float fL1 = 0, fL2 = 0, fR1 = 0, fR2 = 0;   // filter state
     };
     void startEnvelope (Voice& v);
+    struct ChannelState;
+    void releaseChannel (ChannelState& cs);                    // note-off: fade the voice, end a MIDI note
+    void midiNoteOff (int& note, int chan);
+    void midiNoteOn (int note, int chan, int velocity, int program);
+    int  blockOffset = 0;                                     // where in the block MIDI events go
+    int  lastProgram[17] {};                                  // per MIDI channel, 0 = none sent yet
+    int  previewMidiNote = -1, previewMidiChan = 1;
 
     struct ChannelState
     {
@@ -137,7 +160,11 @@ private:
         int  pan = 128;            // 0..255
         int  fineTune = 0;
         bool keyedOff = false;
-
+        int  fxCutoff = -1, fxReso = -1;     // 0X / 0Z filter override (0..127), -1 = use the instrument's
+        int  fxDrive = -1, fxAccent = -1;    // 0Y / 0V override (0..64)
+        int  midiNote = -1, midiChan = 1;    // a MIDI note sounding on this channel (MIDI instrument)
+        bool midiPending = false;            // note-on waits until the row's effects (0Cxx = velocity) are read
+        int  midiProgram = 0;
         // effect state for the current row
         Cell cell;
         int  delayTick = -1;
@@ -174,15 +201,16 @@ private:
     void switchToQueued (bool keepPosition);
     void updateVoiceTargets (int ch);
 
-    void renderVoices (float* L, float* R, int numSamples);
-    void renderVoice (Voice& v, float* L, float* R, int numSamples, float& peak);
+    void renderVoices (float* L, float* R, int offset, int numSamples);
+    void renderVoice (Voice& v, float* L, float* R, int numSamples, float& peak, int channel = -1);
     static float readFrame (const InstrumentSnapshot& s, int ch, double pos) noexcept;
     void fadeOutVoice (Voice& v);
 
     double samplesPerTick() const noexcept;
     static int waveValue (int wave, int pos) noexcept;   // -255..255
 
-    std::array<Pattern, kMaxPatterns> patterns;
+    // ~1 MB with 16 channels: kept on the heap, so the engine (and the processor) stay small
+    std::unique_ptr<std::array<Pattern, kMaxPatterns>> patterns { std::make_unique<std::array<Pattern, kMaxPatterns>>() };
     juce::CriticalSection dataLock;
 
     juce::SpinLock snapLock;
@@ -206,6 +234,11 @@ private:
     bool loopJumpPending = false;
     int  loopJumpRow = 0;
     std::vector<float> monoScratch;
+    std::vector<float> chanScratch;     // kNumChannels * 2 * chanScratchSize, for channelInsert
+    int chanScratchSize = 0;
+    float* chanL (int ch) noexcept { return chanScratch.data() + (size_t) (ch * 2) * (size_t) chanScratchSize; }
+    float* chanR (int ch) noexcept { return chanScratch.data() + (size_t) (ch * 2 + 1) * (size_t) chanScratchSize; }
+    bool useChannelBuffers = false;     // this block renders channels separately
     float smoothCoeff = 0.01f;
     float fadeStep = 0.01f;
 };

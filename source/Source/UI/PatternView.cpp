@@ -65,14 +65,18 @@ void PatternView::paint (Graphics& g)
     int sr0 = 0, sr1 = -1, sc0 = 0, sc1 = -1;
     if (st.hasSelection) selectionBounds (sr0, sr1, sc0, sc1);
 
-    for (int ch = 0; ch < kNumChannels; ++ch)
+    // 4 channels at a time; the view pages sideways with the cursor (CH1-4, CH5-8 ...)
+    const int firstCh = st.firstVisibleChannel(), usedCh = st.numChannels();
+    for (int v = 0; v < kVisibleChannels; ++v)
     {
-        const float x0 = ch * (geo.colW + geo.gap);
+        const int ch = firstCh + v;
+        const float x0 = v * (geo.colW + geo.gap);
         auto col = Rectangle<float> (x0, 0.0f, geo.colW, (float) getHeight());
         g.setColour (Colour (0xff4a4d53));
         g.fillRect (col);
         g.setColour (Theme::screen);
         g.fillRect (col.reduced (2.0f));
+        if (ch >= usedCh) continue;
 
         const bool muted = e.mix[ch].mute.load();
         const Colour textCol = muted ? Theme::screenDim.darker (0.4f) : Theme::screenText;
@@ -152,8 +156,10 @@ void PatternView::paint (Graphics& g)
 bool PatternView::cellAt (Point<float> p, int& row, int& ch, int& col) const
 {
     const auto geo = geometry();
-    ch = jlimit (0, kNumChannels - 1, (int) (p.x / (geo.colW + geo.gap)));
-    const float lx = p.x - ch * (geo.colW + geo.gap);
+    const int v = jlimit (0, kVisibleChannels - 1, (int) (p.x / (geo.colW + geo.gap)));
+    const float lx = p.x - v * (geo.colW + geo.gap);
+    auto& es = const_cast<EditorState&> (st);
+    ch = jlimit (0, es.numChannels() - 1, es.firstVisibleChannel() + v);
     auto& e = st.engine();
     auto& pat = const_cast<PatternView*> (this)->pattern();
     const int rows = pat.getNumRows();
@@ -236,14 +242,14 @@ void PatternView::moveCursor (int dRow, int dCol, bool extend)
         if (extend)
         {
             if (! st.hasSelection) { st.anchorRow = st.cursorRow; st.anchorCh = st.cursorCh; }
-            st.cursorCh = jlimit (0, kNumChannels - 1, st.cursorCh + (dCol > 0 ? 1 : -1));
+            st.cursorCh = jlimit (0, st.numChannels() - 1, st.cursorCh + (dCol > 0 ? 1 : -1));
             updateSelectionFromAnchor();
         }
         else
         {
             st.hasSelection = false;
             int c = st.cursorCh * 7 + st.cursorCol + dCol;
-            c = (c + kNumChannels * 7) % (kNumChannels * 7);
+            c = (c + st.numChannels() * 7) % (st.numChannels() * 7);
             st.cursorCh = c / 7;
             st.cursorCol = c % 7;
         }
@@ -282,8 +288,10 @@ bool PatternView::handleKey (const KeyPress& k)
     const bool shift = mods.isShiftDown();
     const bool ctrl = mods.isCtrlDown() || mods.isCommandDown();
 
-    if (code == KeyPress::upKey)       { moveCursor (-1, 0, shift); return true; }
-    if (code == KeyPress::downKey)     { moveCursor (1, 0, shift);  return true; }
+    // up / down jump SPACING rows (Shift+arrows still select one row at a time)
+    const int rowStep = shift ? 1 : jmax (1, st.editStep);
+    if (code == KeyPress::upKey)       { moveCursor (-rowStep, 0, shift); return true; }
+    if (code == KeyPress::downKey)     { moveCursor (rowStep, 0, shift);  return true; }
     if (code == KeyPress::leftKey)     { moveCursor (0, -1, shift); return true; }
     if (code == KeyPress::rightKey)    { moveCursor (0, 1, shift);  return true; }
     if (code == KeyPress::pageUpKey)   { setCursorRow (jmax (0, st.cursorRow - 16), shift); return true; }
@@ -293,7 +301,7 @@ bool PatternView::handleKey (const KeyPress& k)
     if (code == KeyPress::tabKey)
     {
         st.hasSelection = false;
-        st.cursorCh = (st.cursorCh + (shift ? kNumChannels - 1 : 1)) % kNumChannels;
+        st.cursorCh = (st.cursorCh + (shift ? st.numChannels() - 1 : 1)) % st.numChannels();
         st.cursorCol = 0;
         st.changed(); repaint();
         return true;
@@ -306,7 +314,7 @@ bool PatternView::handleKey (const KeyPress& k)
     if (ctrl && (code == 'V' || code == 'v')) { pasteBlock(); return true; }
     if (ctrl && (code == 'A' || code == 'a'))
     {
-        st.anchorRow = 0; st.anchorCh = 0; st.cursorRow = numRows() - 1; st.cursorCh = kNumChannels - 1;
+        st.anchorRow = 0; st.anchorCh = 0; st.cursorRow = numRows() - 1; st.cursorCh = st.numChannels() - 1;
         updateSelectionFromAnchor(); repaint();
         return true;
     }
@@ -334,6 +342,29 @@ bool PatternView::handleKey (const KeyPress& k)
     }
 
     const auto c = (juce_wchar) k.getTextCharacter();
+
+    // X / Z / Y / V in the effect number: Four Tracker's sound commands
+    // (0Xvv cutoff, 0Zvv resonance, 0Yvv distortion, 0Vvv accent)
+    if (st.cursorCol == 3 || st.cursorCol == 4)
+    {
+        uint8_t cmd = 0;
+        switch (CharacterFunctions::toUpperCase (c))
+        {
+            case 'X': cmd = fxFilterCutoff; break;
+            case 'Z': cmd = fxFilterResonance; break;
+            case 'Y': cmd = fxDistortion; break;
+            case 'V': cmd = fxAccent; break;
+            default: break;
+        }
+        if (cmd != 0)
+        {
+            st.pushUndo (st.viewPattern());
+            pattern().at (st.cursorRow, st.cursorCh).fx = cmd;
+            setCursorRow (st.cursorRow + st.editStep, false);
+            return true;
+        }
+    }
+
     const int digit = CharacterFunctions::getHexDigitValue (c);
     if (digit >= 0) { enterHexDigit (digit); return true; }
     return false;
@@ -451,7 +482,7 @@ void PatternView::pasteBlock()
         for (size_t c = 0; c < st.blockClip[r].size(); ++c)
         {
             const int rr = st.cursorRow + (int) r, cc = st.cursorCh + (int) c;
-            if (rr < pat.getNumRows() && cc < kNumChannels) pat.at (rr, cc) = st.blockClip[r][c];
+            if (rr < pat.getNumRows() && cc < st.numChannels()) pat.at (rr, cc) = st.blockClip[r][c];
         }
     st.setStatus ("PASTED BLOCK");
     repaint();
@@ -463,7 +494,7 @@ void PatternView::copyWholeBlock()
     const int rows = pat.getNumRows();
     st.patternClip.assign (&pat.cells[0][0], &pat.cells[0][0] + rows * kNumChannels);
     st.patternClipRows = rows;
-    st.setStatus ("COPIED BLOCK - PATTERN " + formatNumber (st.viewPattern(), 2, st.hex()) + ", " + String (rows) + " ROWS X 4 CH");
+    st.setStatus ("COPIED BLOCK - PATTERN " + formatNumber (st.viewPattern(), 2, st.hex()) + ", " + String (rows) + " ROWS X " + String (st.numChannels()) + " CH");
     st.changed();
 }
 

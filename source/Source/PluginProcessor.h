@@ -8,6 +8,8 @@
 #include "TrackerEngine.h"
 #include "Instrument.h"
 
+class FxHost;   // VST effect hosting (FX build only)
+
 class FourTrackerProcessor : public juce::AudioProcessor,
                              public juce::ChangeBroadcaster,
                              private juce::Timer
@@ -28,7 +30,7 @@ public:
 
     const juce::String getName() const override { return "Four Tracker"; }
     bool acceptsMidi() const override  { return true; }
-    bool producesMidi() const override { return false; }
+    bool producesMidi() const override { return true; }   // MIDI instruments
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
@@ -80,6 +82,17 @@ public:
         sounds as WAV files, if they are not there yet. */
     static void ensureDemoFolder();
 
+    /** VST effects per channel. nullptr unless this is the FX build running as the standalone app. */
+    FxHost* getFxHost() const noexcept;
+    /** Removes the VST effects from every channel (FX build; does nothing otherwise). */
+    void clearAllEffects();
+
+    /** Number of tracks (channels) in the song, 1..16 (+ / - TRACK). Fewer clears the ones beyond. */
+    void setNumChannels (int n);
+    int  getNumChannels() const noexcept { return engine.numChannels.load(); }
+    /** True if a track has anything in any pattern. */
+    bool trackHasNotes (int channel);
+
     /** UI preferences kept with the session. */
     bool hexMode = true;
     int  selectedInstrument = 1;
@@ -88,6 +101,7 @@ private:
     void timerCallback() override;
 
     void writeSong (juce::ValueTree& t) const;
+    static int normaliseChannels (int n);
     void readSong (const juce::ValueTree& t);
 
     juce::ValueTree patternsToTree() const;
@@ -98,6 +112,9 @@ private:
     ft::TrackerEngine engine;
     std::array<ft::Instrument, ft::kNumInstruments> instruments;
     ft::Instrument audition;
+   #if FOURTRACKER_FX_HOST
+    std::unique_ptr<FxHost> fx;
+   #endif
     juce::File auditionSource;
     juce::AudioFormatManager formats;
 

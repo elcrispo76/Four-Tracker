@@ -292,13 +292,13 @@ footer .wrap { display: grid; gap: 8px; }
         <p class="lede">A 4-channel sample tracker you play live: every key on your MIDI keyboard is a pattern.</p>
         <div class="actions">
           <a class="btn btn-red js-download" href="#download">
-            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.2.0</span> beta</small></span>
+            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.3.0</span> beta</small></span>
           </a>
           <a class="btn btn-light js-donate" href="#donate">
             <span class="btn-text">DONATE<small>Keep it going</small></span>
           </a>
         </div>
-        <p class="meta">Standalone app with ASIO, and a VST3 plugin for your DAW. 64-bit Windows 10/11.</p>
+        <p class="meta">Standalone app with VST3 effects, and a VST3 plugin for your DAW. Windows 10/11, 64-bit and 32-bit.</p>
       </div>
       <div class="bezel">
         <img src="images/tracks.jpg" alt="Four Tracker's main view: four channel strips above a pattern with notes, instruments and effects in each channel." width="1536" height="1024">
@@ -345,7 +345,7 @@ footer .wrap { display: grid; gap: 8px; }
         <article class="panel feature">
           <span class="cell">C-4 01 0C40</span>
           <h3>Classic tracker patterns</h3>
-          <p>4 channels, 64 patterns of up to 256 rows, note · instrument · effect in every cell, hex or decimal.</p>
+          <p>1 to 16 tracks (add them one at a time with + / −), 64 patterns of up to 256 rows, note · instrument · effect in every cell, hex or decimal.</p>
         </article>
         <article class="panel feature">
           <span class="cell">00xy 03xx 0E9x 1Bxy</span>
@@ -355,22 +355,22 @@ footer .wrap { display: grid; gap: 8px; }
         <article class="panel feature">
           <span class="cell">WAV AIFF FLAC 8SVX</span>
           <h3>Your samples, old and new</h3>
-          <p>WAV, AIFF, FLAC, Ogg and MP3, plus Amiga IFF 8SVX and raw 8-bit samples straight off ProTracker and OctaMED disks. The built-in browser plays each sample as you arrow through the folder. Or make any slot a synth: sine, triangle, saw, square or noise, with ADSR and a resonant filter.</p>
+          <p>WAV, AIFF, FLAC, Ogg and MP3, plus Amiga IFF 8SVX and raw 8-bit samples straight off ProTracker and OctaMED disks. The built-in browser plays each sample as you arrow through the folder. Or make any slot a synth: sine, triangle, saw, square or noise, with ADSR, a resonant filter, distortion and accent.</p>
         </article>
         <article class="panel feature">
           <span class="cell">S ▸ LOOP ◂ E</span>
           <h3>Sample editor</h3>
-          <p>Start, end and loop points, ping-pong and reverse, cut, paste, fades and normalize. 16 instrument slots.</p>
+          <p>Start, end and loop points, ping-pong and reverse, cut, paste, fades, normalize and OctaMED-style MIX of two samples. Ctrl+A / C / X / V. 16 instrument slots.</p>
         </article>
         <article class="panel feature">
           <span class="cell">CTRL+F3 F4 F5</span>
           <h3>Fast editing</h3>
-          <p>Cut, copy and paste whole tracks or whole patterns, undo, edit step, octaves C-0 to B-7.</p>
+          <p>Cut, copy and paste whole tracks or whole patterns, undo, SPACING 0-32 rows for the cursor, octaves C-0 to B-7.</p>
         </article>
         <article class="panel feature">
-          <span class="cell">2 × 4 = 8 CH</span>
+          <span class="cell">VST3 FX · MIDI OUT</span>
           <h3>Standalone or in your DAW</h3>
-          <p>Run it on its own with ASIO, or load it as a VST3 instrument. Two instances on two tracks give you 8 channels.</p>
+          <p>Run it on its own with two VST3 effects per track, and chain one track into another track's effects. Or load it as a VST3 instrument. MIDI instruments play your hardware or software synths from the pattern.</p>
         </article>
       </div>
     </div>
@@ -401,14 +401,14 @@ footer .wrap { display: grid; gap: 8px; }
       </div>
       <div class="download-grid">
         <div class="panel dl-card">
-          <h3>FOUR TRACKER <span class="js-version">v0.2.0</span> <span class="badge">BETA</span></h3>
+          <h3>FOUR TRACKER <span class="js-version">v0.3.0</span> <span class="badge">BETA</span></h3>
           <dl class="spec">
             <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
-            <dt>Includes</dt><dd>Standalone app (ASIO, WASAPI), VST3 plugin 64-bit and 32-bit, user manual (PDF)</dd>
+            <dt>Includes</dt><dd>Standalone app (Windows Audio / WASAPI, DirectSound) with VST3 effects, VST3 plugin 64-bit and 32-bit, user manual (PDF)</dd>
             <dt>Hosts</dt><dd>Any DAW that loads VST3 instruments</dd>
             <dt>Price</dt><dd>Free</dd>
           </dl>
-          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.2.0-share.exe</small></span></a></div>
+          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.3.0-share-fx.exe</small></span></a></div>
           <p class="note">Windows may say "Windows protected your PC" because the installer isn't signed. Click <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
         <div class="panel dl-card">
@@ -425,7 +425,7 @@ footer .wrap { display: grid; gap: 8px; }
     <div class="wrap">
       <div class="section-head">
         <h2>STATUS: BETA</h2>
-        <p>Four Tracker <span class="js-version">v0.2.0</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
+        <p>Four Tracker <span class="js-version">v0.3.0</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
       </div>
       <div class="status-grid">
         <div class="panel status-card">
@@ -468,17 +468,17 @@ footer .wrap { display: grid; gap: 8px; }
 <footer>
   <div class="wrap">
     <p>© <span id="year">2026</span> Four Tracker. Made with JUCE.</p>
-    <p>VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a trademark and software of Steinberg Media Technologies GmbH.</p>
+    <p>VST is a registered trademark of Steinberg Media Technologies GmbH.</p>
   </div>
 </footer>
 
 <script>
 /* ===== Edit these links before you put the site online ===== */
 const SITE = {
-  version:  "0.2.0",
+  version:  "0.3.0",
   // Where the installer is hosted, e.g. a GitHub release:
-  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.2.0-share.exe"
-  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.2.0/FourTracker-Setup-0.2.0-share.exe",
+  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.3.0-share-fx.exe"
+  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.3.0/FourTracker-Setup-0.3.0-share-fx.exe",
   // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
   donate:   "https://ko-fi.com/fourtracker",
   donateLabel: "Any amount",

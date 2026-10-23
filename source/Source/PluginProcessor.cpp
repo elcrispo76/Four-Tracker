@@ -4,6 +4,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "DemoContent.h"
+#include "FxHost.h"
 
 using namespace ft;
 
@@ -23,12 +24,44 @@ FourTrackerProcessor::FourTrackerProcessor()
     for (int i = 1; i < kNumInstruments; ++i)
         engine.publishInstrument (i, instruments[(size_t) i].makeSnapshot());
 
+
+   #if FOURTRACKER_FX_HOST
+    // VST effects only in the standalone app: inside a DAW, use the DAW's own effects
+    if (wrapperType == wrapperType_Standalone)
+    {
+        fx = std::make_unique<FxHost>();
+        engine.channelInsert = [this] (int ch, float* l, float* r, int n) { fx->process (ch, l, r, n); };
+        engine.channelRoute = [this] (int ch) { return fx->getRoute (ch); };
+    }
+   #endif
+
     startTimer (1000);
 }
 
 FourTrackerProcessor::~FourTrackerProcessor()
 {
     stopTimer();
+   #if FOURTRACKER_FX_HOST
+    engine.channelInsert = nullptr;
+    engine.channelRoute = nullptr;
+    if (fx != nullptr) { fx->saveSettings(); fx.reset(); }
+   #endif
+}
+
+void FourTrackerProcessor::clearAllEffects()
+{
+   #if FOURTRACKER_FX_HOST
+    if (fx != nullptr) fx->clearAll();
+   #endif
+}
+
+FxHost* FourTrackerProcessor::getFxHost() const noexcept
+{
+   #if FOURTRACKER_FX_HOST
+    return fx.get();
+   #else
+    return nullptr;
+   #endif
 }
 
 void FourTrackerProcessor::timerCallback()
@@ -36,9 +69,12 @@ void FourTrackerProcessor::timerCallback()
     engine.collectGarbage();
 }
 
-void FourTrackerProcessor::prepareToPlay (double sampleRate, int)
+void FourTrackerProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.prepare (sampleRate);
+    engine.prepare (sampleRate, samplesPerBlock);
+   #if FOURTRACKER_FX_HOST
+    if (fx != nullptr) fx->prepare (sampleRate, samplesPerBlock);
+   #endif
 }
 
 bool FourTrackerProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -60,6 +96,8 @@ void FourTrackerProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     engine.process (buffer, midi, hostBpm);
     midi.clear();
+    midi.swapWith (engine.midiOut);       // notes from MIDI instruments go out (device or DAW)
+    engine.midiOut.clear();
 }
 
 juce::AudioProcessorEditor* FourTrackerProcessor::createEditor()
@@ -147,10 +185,11 @@ juce::ValueTree FourTrackerProcessor::patternsToTree() const
         const int rows = pat.getNumRows();
         if (pat.isEmpty() && rows == kDefaultRows) continue;
 
-        juce::MemoryBlock mb ((size_t) (rows * kNumChannels * 4));
+        const int chans = juce::jlimit (1, kNumChannels, engine.numChannels.load());
+        juce::MemoryBlock mb ((size_t) (rows * chans * 4));
         auto* d = static_cast<uint8_t*> (mb.getData());
         for (int r = 0; r < rows; ++r)
-            for (int c = 0; c < kNumChannels; ++c)
+            for (int c = 0; c < chans; ++c)
             {
                 const auto& cell = pat.at (r, c);
                 *d++ = cell.note; *d++ = cell.inst; *d++ = cell.fx; *d++ = cell.param;
@@ -159,6 +198,7 @@ juce::ValueTree FourTrackerProcessor::patternsToTree() const
         juce::ValueTree pt (ids::pat);
         pt.setProperty ("index", p, nullptr);
         pt.setProperty ("rows", rows, nullptr);
+        pt.setProperty ("chans", chans, nullptr);
         pt.setProperty ("data", mb, nullptr);
         t.appendChild (pt, nullptr);
     }
@@ -187,10 +227,11 @@ void FourTrackerProcessor::patternsFromTree (const juce::ValueTree& t)
         if (auto* mb = pt.getProperty ("data").getBinaryData())
         {
             const auto* d = static_cast<const uint8_t*> (mb->getData());
-            const int cells = juce::jmin (rows * kNumChannels, (int) mb->getSize() / 4);
+            const int chans = juce::jlimit (1, kNumChannels, (int) pt.getProperty ("chans", 4));   // old files: 4
+            const int cells = juce::jmin (rows * chans, (int) mb->getSize() / 4);
             for (int i = 0; i < cells; ++i)
             {
-                auto& cell = pat.at (i / kNumChannels, i % kNumChannels);
+                auto& cell = pat.at (i / chans, i % chans);
                 cell.note = d[0] <= kNoteOff ? d[0] : 0;
                 cell.inst = d[1] < kNumInstruments ? d[1] : 0;
                 cell.fx = d[2];
@@ -225,6 +266,12 @@ juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
         it.setProperty ("end", p.end, nullptr);
         it.setProperty ("loopStart", p.loopStart, nullptr);
         it.setProperty ("loopEnd", p.loopEnd, nullptr);
+        if (p.midi)
+        {
+            it.setProperty ("midi", true, nullptr);
+            it.setProperty ("midiCh", p.midiChannel, nullptr);
+            it.setProperty ("midiProg", p.midiProgram, nullptr);
+        }
         if (p.synth)
         {
             it.setProperty ("synth", true, nullptr);
@@ -235,6 +282,8 @@ juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
             it.setProperty ("release", p.release, nullptr);
             it.setProperty ("cutoff", p.cutoff, nullptr);
             it.setProperty ("resonance", p.resonance, nullptr);
+            it.setProperty ("distortion", p.distortion, nullptr);
+            it.setProperty ("accent", p.accent, nullptr);
         }
         it.setProperty ("rate", in.data->sampleRate, nullptr);
         it.setProperty ("bits", in.data->bitDepth, nullptr);
@@ -296,6 +345,11 @@ void FourTrackerProcessor::instrumentsFromTree (const juce::ValueTree& t)
         p.release = it.getProperty ("release", 200);
         p.cutoff = it.getProperty ("cutoff", 127);
         p.resonance = it.getProperty ("resonance", 0);
+        p.distortion = it.getProperty ("distortion", 0);
+        p.accent = it.getProperty ("accent", 0);
+        p.midi = it.getProperty ("midi", false);
+        p.midiChannel = it.getProperty ("midiCh", 1);
+        p.midiProgram = it.getProperty ("midiProg", 0);
         in.sanitise();
     }
 
@@ -316,6 +370,7 @@ void FourTrackerProcessor::writeSong (juce::ValueTree& t) const
     t.setProperty ("loop", engine.loopPattern.load(), nullptr);
     t.setProperty ("selectedPattern", engine.selectedPattern.load(), nullptr);
     t.setProperty ("selectedInstrument", selectedInstrument, nullptr);
+    t.setProperty ("channels", engine.numChannels.load(), nullptr);
 
     juce::ValueTree mixer (ids::mixer);
     for (int c = 0; c < kNumChannels; ++c)
@@ -335,6 +390,8 @@ void FourTrackerProcessor::writeSong (juce::ValueTree& t) const
 void FourTrackerProcessor::readSong (const juce::ValueTree& t)
 {
     engine.requestStop();
+    // modules from before 8 / 16 channels have no "channels": they are 4-channel songs
+    engine.numChannels = normaliseChannels ((int) t.getProperty ("channels", 4));
     engine.speed = juce::jlimit (1, 31, (int) t.getProperty ("speed", 6));
     engine.bpm = juce::jlimit (32, 255, (int) t.getProperty ("bpm", 125));
     engine.loopPattern = (bool) t.getProperty ("loop", true);
@@ -400,6 +457,43 @@ void FourTrackerProcessor::setStateInformation (const void* data, int sizeInByte
 // new / demo / modules
 // ===========================================================================
 
+int FourTrackerProcessor::normaliseChannels (int n)
+{
+    return juce::jlimit (1, kNumChannels, n);
+}
+
+bool FourTrackerProcessor::trackHasNotes (int channel)
+{
+    for (int p = 0; p < kMaxPatterns; ++p)
+        for (int r = 0; r < kMaxRows; ++r)
+            if (! engine.getPattern (p).at (r, channel).isEmpty()) return true;
+    return false;
+}
+
+void FourTrackerProcessor::setNumChannels (int n)
+{
+    n = normaliseChannels (n);
+    engine.requestStop();
+    {
+        const juce::ScopedLock sl (engine.getDataLock());
+        for (int p = 0; p < kMaxPatterns; ++p)
+            for (int r = 0; r < kMaxRows; ++r)
+                for (int c = n; c < kNumChannels; ++c)
+                    engine.getPattern (p).at (r, c).clear();
+        engine.numChannels = n;
+    }
+   #if FOURTRACKER_FX_HOST
+    if (fx != nullptr)       // a removed track takes its effects with it
+        for (int c = n; c < kNumChannels; ++c)
+            for (int i = 0; i < 2; ++i)
+                if (fx->hasPlugin (c, i)) fx->clearSlot (c, i);
+    if (fx != nullptr)       // ...and its chaining, both from it and into it
+        for (int c = 0; c < kNumChannels; ++c)
+            if ((c >= n && fx->getRoute (c) != -1) || fx->getRoute (c) >= n) fx->setRoute (c, -1);
+   #endif
+    sendChangeMessage();
+}
+
 void FourTrackerProcessor::newPatternSet()
 {
     engine.requestStop();
@@ -461,7 +555,10 @@ void FourTrackerProcessor::ensureDemoFolder()
 
     if (! samplesDir.createDirectory()) return;
 
-    FourTrackerProcessor demo;          // starts with the demo song loaded
+    // a second processor that starts with the demo song (on the heap: it is too big for the stack on Windows)
+    AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+    auto demoPtr = std::make_unique<FourTrackerProcessor>();
+    auto& demo = *demoPtr;
     if (! song.existsAsFile())
         demo.saveModule (song);
 

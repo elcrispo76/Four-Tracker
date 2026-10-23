@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(FourTracker VERSION 0.2.0 LANGUAGES C CXX)
+project(FourTracker VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,13 @@ set(JUCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/JUCE" CACHE PATH "Path to JUCE")
 set(ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK (enables ASIO in the standalone app)")
 set(VST2_SDK_DIR "" CACHE PATH "Path to the legacy VST2 SDK (enables the VST2 plugin)")
 
+# Personal build with VST effect hosting (2 effects per channel, standalone app only).
+option(FOURTRACKER_FX_HOST "Host VST effects in the standalone app" OFF)
+
+# A build to give to others: the VST2 SDK is never used, even when it is in SDKs/
+# (no VST2 plugin, no VST2 effect hosting). VST3 is MIT licensed and fine to share.
+option(FOURTRACKER_NO_VST2 "Ignore the VST2 SDK (build to share)" OFF)
+
 # Linux-only switch used for compile checks on machines without audio/X11 dev packages.
 option(FOURTRACKER_HEADLESS_CHECK "Disable ALSA/X11 extensions (compile check only)" OFF)
 
@@ -31,7 +38,10 @@ set(FT_FORMATS Standalone VST3)
 if(VST2_SDK_DIR)
     file(TO_CMAKE_PATH "${VST2_SDK_DIR}" VST2_SDK_DIR)
 endif()
-if(NOT VST2_SDK_DIR OR NOT EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
+if(FOURTRACKER_NO_VST2)
+    message(STATUS "  >>> DELE-VERSION: VST2 SDK bliver IKKE brugt (kun VST3)")
+endif()
+if(NOT FOURTRACKER_NO_VST2 AND (NOT VST2_SDK_DIR OR NOT EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h"))
     file(GLOB_RECURSE _ft_aeffect LIST_DIRECTORIES false "${CMAKE_CURRENT_SOURCE_DIR}/SDKs/*aeffect.h")
     foreach(_f IN LISTS _ft_aeffect)
         if(_f MATCHES "/pluginterfaces/vst2\\.x/aeffect\\.h$")
@@ -46,12 +56,15 @@ if(NOT VST2_SDK_DIR OR NOT EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect
     endforeach()
 endif()
 
-if(VST2_SDK_DIR AND EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
+if(NOT FOURTRACKER_NO_VST2 AND VST2_SDK_DIR AND EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
     juce_set_vst2_sdk_path("${VST2_SDK_DIR}")
     list(APPEND FT_FORMATS VST)
     message(STATUS "")
     message(STATUS "  >>> VST2 SDK FUNDET: ${VST2_SDK_DIR}")
     message(STATUS "  >>> VST2 plugin (Four Tracker.dll) bliver bygget")
+    message(STATUS "")
+elseif(FOURTRACKER_NO_VST2)
+    message(STATUS "  >>> Der bygges kun Standalone + VST3")
     message(STATUS "")
 else()
     message(STATUS "")
@@ -84,7 +97,7 @@ juce_add_plugin(FourTracker
     FORMATS                     ${FT_FORMATS}
     IS_SYNTH                    TRUE
     NEEDS_MIDI_INPUT            TRUE
-    NEEDS_MIDI_OUTPUT           FALSE
+    NEEDS_MIDI_OUTPUT           TRUE
     IS_MIDI_EFFECT              FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD     FALSE
@@ -108,7 +121,9 @@ target_sources(FourTracker PRIVATE
     Source/UI/HeaderBar.cpp
     Source/UI/Pages.cpp
     Source/UI/SettingsPage.cpp
-    Source/UI/SampleBrowser.cpp)
+    Source/UI/SampleBrowser.cpp
+    Source/FxHost.cpp
+    Source/UI/FxPage.cpp)
 
 target_include_directories(FourTracker PRIVATE Source)
 
@@ -141,6 +156,21 @@ elseif(WIN32)
     message(STATUS "")
 endif()
 
+if(FOURTRACKER_FX_HOST)
+    target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
+    if(NOT FOURTRACKER_NO_VST2 AND VST2_SDK_DIR AND EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
+        target_compile_definitions(FourTracker PUBLIC JUCE_PLUGINHOST_VST=1)
+        target_include_directories(FourTracker PUBLIC "${VST2_SDK_DIR}")
+        message(STATUS "  >>> FX-VERSION: kan hente VST3- og VST2-effekter")
+    else()
+        if(FOURTRACKER_NO_VST2)
+            message(STATUS "  >>> FX-DELE-VERSION: kan hente VST3-effekter (ingen VST2) - maa gerne deles")
+        else()
+            message(STATUS "  >>> FX-VERSION: kan hente VST3-effekter (VST2 kraever VST2 SDK)")
+        endif()
+    endif()
+endif()
+
 if(FOURTRACKER_HEADLESS_CHECK)
     target_compile_definitions(FourTracker PUBLIC
         JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)
@@ -167,6 +197,9 @@ if(FOURTRACKER_BUILD_TESTS)
     target_include_directories(FourTrackerTests PRIVATE Source)
     target_compile_definitions(FourTrackerTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+    if(FOURTRACKER_FX_HOST)
+        target_compile_definitions(FourTrackerTests PRIVATE FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
+    endif()
     if(FOURTRACKER_HEADLESS_CHECK)
         target_compile_definitions(FourTrackerTests PRIVATE
             JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)

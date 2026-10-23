@@ -74,7 +74,7 @@ SettingsPage::SettingsPage (EditorState& s) : st (s)
             deviceLnf = std::make_unique<LookAndFeel_V4> (LookAndFeel_V4::ColourScheme {
                 Colour (0xffc4c7cf), Colour (0xffc4c7cf), Colour (0xffd8dade), Colour (0xff878b94), Colour (0xff0c0d0f),
                 Colour (0xffe4e6eb), Colour (0xff0c0d0f), Colour (0xff5d6169), Colour (0xff0c0d0f) });
-            deviceSelector = std::make_unique<AudioDeviceSelectorComponent> (holder->deviceManager, 0, 0, 2, 2, true, false, true, false);
+            deviceSelector = std::make_unique<AudioDeviceSelectorComponent> (holder->deviceManager, 0, 0, 2, 2, true, true, true, false);   // MIDI in + MIDI out
             deviceSelector->setLookAndFeel (deviceLnf.get());
             addAndMakeVisible (*deviceSelector);
         }
@@ -102,6 +102,12 @@ void SettingsPage::updateModeButtons()
 
 void SettingsPage::refresh()
 {
+   #if JucePlugin_Build_Standalone
+    // MIDI instruments: send to the MIDI output chosen here (it changes while the audio runs)
+    if (isStandalone)
+        if (auto* holder = StandalonePluginHolder::getInstance())
+            holder->player.setMidiOutput (holder->deviceManager.getDefaultMidiOutput());
+   #endif
     auto& e = st.engine();
     baseNote.setValue (e.midiBaseNote.load());
     channel.setValue (e.midiChannel.load());

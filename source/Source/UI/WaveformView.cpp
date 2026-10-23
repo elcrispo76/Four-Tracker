@@ -260,6 +260,13 @@ void WaveformView::paint (Graphics& g)
 
     if (len == 0)
         Theme::text (g, interactive ? "NO SAMPLE - LOAD ONE ON THE INSTRUMENTS PAGE" : "EMPTY", r, 16.0f, Theme::screenDim, Justification::centred);
+
+    // keyboard shortcuts (Ctrl+A/C/X/V) are active: thin white frame
+    if (keysActive)
+    {
+        g.setColour (Theme::screenText);
+        g.drawRect (r, 2.0f);
+    }
 }
 
 WaveformView::Drag WaveformView::hitTestMarker (Point<float> p) const
@@ -303,6 +310,7 @@ void WaveformView::mouseMove (const MouseEvent& e)
 void WaveformView::mouseDown (const MouseEvent& e)
 {
     if (! interactive) { if (onClicked) onClicked(); return; }
+    if (onActivated) onActivated();
     if (length() == 0) return;
 
     drag = hitTestMarker (e.position);

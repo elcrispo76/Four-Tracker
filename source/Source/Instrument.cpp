@@ -22,6 +22,10 @@ void Instrument::sanitise()
     p.release   = juce::jlimit (0, 5000, p.release);
     p.cutoff    = juce::jlimit (0, 127, p.cutoff);
     p.resonance = juce::jlimit (0, 127, p.resonance);
+    p.distortion = juce::jlimit (0, 64, p.distortion);
+    p.accent    = juce::jlimit (0, 64, p.accent);
+    p.midiChannel = juce::jlimit (1, 16, p.midiChannel);
+    p.midiProgram = juce::jlimit (0, 128, p.midiProgram);
 
     const int len = data != nullptr ? data->getLength() : 0;
     if (len <= 0) { p.start = p.end = p.loopStart = p.loopEnd = 0; return; }
@@ -94,6 +98,30 @@ void Instrument::makeSynth (int wave)
     params.pingPong = params.loopBackward = params.reverse = false;
     resetPoints();
     if (name.isEmpty() || name == oldAutoName || ! wasSynth) name = juce::String ("SYNTH ") + synthWaveName (wave);
+    sourcePath = {};
+    sanitise();
+}
+
+void Instrument::makeMidi()
+{
+    const bool was = isMidi();
+    const auto oldName = was ? "MIDI CH " + juce::String (params.midiChannel) : juce::String();
+    const int ch = was ? params.midiChannel : 1, prog = was ? params.midiProgram : 0;
+    const int vol = isEmpty() ? 64 : params.volume;
+
+    // one silent frame, so the slot counts as an instrument everywhere; the sound is outside
+    SampleData::Ptr d = new SampleData();
+    d->sampleRate = 44100.0;
+    d->buffer.setSize (1, 1);
+    d->buffer.clear();
+    data = d;
+    params = InstrumentParams();
+    params.volume = vol;
+    params.midi = true;
+    params.midiChannel = ch;
+    params.midiProgram = prog;
+    resetPoints();
+    if (! was || name.isEmpty() || name == oldName) name = "MIDI CH " + juce::String (ch);
     sourcePath = {};
     sanitise();
 }
@@ -231,6 +259,62 @@ bool Instrument::paste (int at, const juce::AudioBuffer<float>& clip)
         d->buffer.copyFrom (c, at, clip, srcCh, 0, n);
         if (at < len)  d->buffer.copyFrom (c, at + n, data->buffer, c, at, len - at);
     }
+    data = d;
+    return true;
+}
+
+bool Instrument::mixIn (const Instrument& other, int at)
+{
+    if (isEmpty() || other.isEmpty()) return false;
+
+    // the other sample's played range (start..end), in playback order
+    const auto& op = other.params;
+    const int oStart = juce::jlimit (0, other.data->getLength() - 1, op.start);
+    const int oEnd   = juce::jlimit (oStart, other.data->getLength() - 1, op.end);
+    const int oLen = oEnd - oStart + 1;
+
+    // resample to this sample's rate (cubic), so it keeps its own pitch
+    const double ratio = other.data->sampleRate / data->sampleRate;      // source frames per output frame
+    const int mixLen = juce::jmax (1, (int) std::floor ((oLen - 1) / ratio) + 1);
+
+    PointKeeper keep (*this);
+    const int len = data->getLength();
+    at = juce::jlimit (0, len, at);
+    const int newLen = juce::jmax (len, at + mixLen);
+    const int nch = juce::jmax (data->getNumChannels(), other.data->getNumChannels());
+
+    SampleData::Ptr d = new SampleData();
+    d->sampleRate = data->sampleRate;
+    d->bitDepth = juce::jmax (data->bitDepth, other.data->bitDepth);
+    d->buffer.setSize (nch, newLen);
+    d->buffer.clear();
+    for (int c = 0; c < nch; ++c)
+        d->buffer.copyFrom (c, 0, data->buffer, juce::jmin (c, data->getNumChannels() - 1), 0, len);
+
+    for (int c = 0; c < nch; ++c)
+    {
+        const float* src = other.data->buffer.getReadPointer (juce::jmin (c, other.data->getNumChannels() - 1));
+        auto s = [&] (int i)
+        {
+            i = juce::jlimit (0, oLen - 1, i);
+            return src[op.reverse ? oEnd - i : oStart + i];
+        };
+        float* dst = d->buffer.getWritePointer (c, at);
+        for (int i = 0; i < mixLen; ++i)
+        {
+            const double pos = i * ratio;
+            const int k = (int) pos;
+            const float f = (float) (pos - k);
+            const float xm1 = s (k - 1), x0 = s (k), x1 = s (k + 1), x2 = s (k + 2);
+            const float c1 = 0.5f * (x1 - xm1);
+            const float c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2;
+            const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+            dst[i] += ((c3 * f + c2) * f + c1) * f + x0;
+        }
+    }
+
+    const float peak = d->buffer.getMagnitude (0, newLen);
+    if (peak > 0.999f) d->buffer.applyGain (0.999f / peak);
     data = d;
     return true;
 }

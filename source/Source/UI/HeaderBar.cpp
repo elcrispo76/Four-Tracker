@@ -36,7 +36,8 @@ String TitleBar::buildStatus()
 void TitleBar::refresh()
 {
     auto s = buildStatus();
-    if (s != lastStatus) { lastStatus = s; repaint(); }
+    const int view = st.numChannels() * 100 + st.firstVisibleChannel();
+    if (s != lastStatus || view != lastView) { lastStatus = s; lastView = view; repaint(); }
 }
 
 void TitleBar::paint (Graphics& g)
@@ -54,9 +55,13 @@ void TitleBar::paint (Graphics& g)
     auto grid = r.removeFromRight (r.getHeight()).reduced (10.0f);
     Theme::iconGrid (g, grid, Theme::screenText);
 
+    r.removeFromRight (rightReserve);
     auto statusArea = r.reduced (24.0f, 0.0f);
-    Theme::text (g, "4 CHANNEL SAMPLE TRACKER", statusArea, 15.0f, Theme::screenText, Justification::centredLeft);
-    g.reduceClipRegion (statusArea.withTrimmedLeft (PixelFont::getWidth ("4 CHANNEL SAMPLE TRACKER", 15.0f) + 16.0f).toNearestInt());
+    const int n = st.numChannels(), first = st.firstVisibleChannel();
+    const String what = n <= kVisibleChannels ? String (n) + " TRACK SAMPLE TRACKER"
+                      : "TRACKS " + String (first + 1) + "-" + String (jmin (n, first + kVisibleChannels)) + " OF " + String (n);
+    Theme::text (g, what, statusArea, 15.0f, Theme::screenText, Justification::centredLeft);
+    g.reduceClipRegion (statusArea.withTrimmedLeft (PixelFont::getWidth (what, 15.0f) + 16.0f).toNearestInt());
     Theme::text (g, lastStatus, statusArea.withTrimmedRight (6.0f), 15.0f, Theme::screenDim.brighter (0.4f), Justification::centredRight);
 }
 
@@ -72,7 +77,7 @@ void TitleBar::mouseDown (const MouseEvent& e)
 HeaderControls::HeaderControls (EditorState& s) : st (s)
 {
     for (auto* c : std::initializer_list<Component*> { &patternBox, &patPrev, &patNext, &instBox, &instPrev, &instNext,
-                                                        &instName, &loop, &speedBox, &bpmBox, &octaveBox, &editBtn, &hexBtn, &decBtn })
+                                                        &instName, &loop, &speedBox, &bpmBox, &octaveBox, &spacingBox, &editBtn, &hexBtn, &decBtn })
         addAndMakeVisible (c);
 
     auto hexFmt = [this] (int v) { return formatNumber (v, 2, st.hex()); };
@@ -107,6 +112,10 @@ HeaderControls::HeaderControls (EditorState& s) : st (s)
     octaveBox.setDragSensitivity (14.0f);
     octaveBox.onChange = [this] (int v) { st.octave = v; st.changed(); };
 
+    spacingBox.setShowSpinner (true);
+    spacingBox.setDragSensitivity (10.0f);
+    spacingBox.onChange = [this] (int v) { st.editStep = v; st.changed(); };
+
     editBtn.onClick = [this] { st.setEditMode (! st.editMode); };
     editBtn.setTooltip ("Edit mode (Space): when lit, note keys write into the pattern");
 
@@ -135,6 +144,7 @@ void HeaderControls::refresh()
     speedBox.setValue (e.speed.load());
     bpmBox.setValue (e.bpm.load());
     octaveBox.setValue (st.octave);
+    spacingBox.setValue (st.editStep);
     editBtn.setToggleState (st.editMode, dontSendNotification);
     hexBtn.setToggleState (st.hex(), dontSendNotification);
     decBtn.setToggleState (! st.hex(), dontSendNotification);
@@ -155,6 +165,8 @@ void HeaderControls::paint (Graphics& g)
     title (speedPanel, "SPEED");
     title (bpmPanel, "BPM");
     title (octavePanel, "OCTAVE");
+    Theme::drawPanel (g, spacingPanel.toFloat());
+    Theme::text (g, "SPACING", Rectangle<float> ((float) spacingPanel.getX() + 10.0f, 13.0f, 90.0f, 15.0f), 14.0f, Theme::ink, Justification::topLeft);
     Theme::drawPanel (g, editPanel.toFloat());
     Theme::drawPanel (g, hexPanel.toFloat());
 }
@@ -162,30 +174,32 @@ void HeaderControls::paint (Graphics& g)
 void HeaderControls::resized()
 {
     // Coordinates follow the 1536x1024 mockup, relative to this component (x0 = 14, y0 = 84).
-    patPanel   = { 0,    0, 328, 106 };
-    instPanel  = { 332,  0, 432, 106 };
-    loopPanel   = { 768,  0, 160, 106 };
-    speedPanel  = { 932,  0, 116, 106 };
-    bpmPanel    = { 1052, 0, 136, 106 };
-    octavePanel = { 1192, 0, 104, 106 };
-    editPanel   = { 1300, 0, 104, 106 };
-    hexPanel   = { 1408, 0, 100, 106 };
+    patPanel     = { 0,    0, 300, 106 };
+    instPanel    = { 304,  0, 404, 106 };
+    loopPanel    = { 712,  0, 140, 106 };
+    speedPanel   = { 856,  0, 104, 106 };
+    bpmPanel     = { 964,  0, 124, 106 };
+    octavePanel  = { 1092, 0, 104, 106 };
+    spacingPanel = { 1200, 0, 104, 106 };
+    editPanel    = { 1308, 0, 104, 106 };
+    hexPanel     = { 1416, 0, 92, 106 };
 
-    patternBox.setBounds (22, 36, 110, 54);
-    patPrev.setBounds (144, 36, 80, 54);
-    patNext.setBounds (230, 36, 82, 54);
+    patternBox.setBounds (20, 36, 102, 54);
+    patPrev.setBounds (130, 36, 74, 54);
+    patNext.setBounds (210, 36, 76, 54);
 
-    instBox.setBounds (instPanel.getX() + 22, 36, 98, 54);
-    instPrev.setBounds (instPanel.getX() + 128, 36, 66, 54);
-    instNext.setBounds (instPanel.getX() + 200, 36, 66, 54);
-    instName.setBounds (instPanel.getX() + 274, 36, 144, 54);
+    instBox.setBounds (instPanel.getX() + 16, 36, 92, 54);
+    instPrev.setBounds (instPanel.getX() + 114, 36, 62, 54);
+    instNext.setBounds (instPanel.getX() + 180, 36, 62, 54);
+    instName.setBounds (instPanel.getX() + 248, 36, 144, 54);
 
-    loop.setBounds (loopPanel.getX() + 14, 36, 132, 54);
-    speedBox.setBounds (speedPanel.getX() + 14, 36, 88, 54);
-    bpmBox.setBounds (bpmPanel.getX() + 14, 36, 108, 54);
+    loop.setBounds (loopPanel.getX() + 12, 36, 116, 54);
+    speedBox.setBounds (speedPanel.getX() + 12, 36, 80, 54);
+    bpmBox.setBounds (bpmPanel.getX() + 12, 36, 100, 54);
     octaveBox.setBounds (octavePanel.getX() + 12, 36, 80, 54);
+    spacingBox.setBounds (spacingPanel.getX() + 12, 36, 80, 54);
     editBtn.setBounds (editPanel.getX() + 10, 10, 84, 86);
 
-    hexBtn.setBounds (hexPanel.getX() + 10, 10, 82, 42);
-    decBtn.setBounds (hexPanel.getX() + 10, 56, 82, 40);
+    hexBtn.setBounds (hexPanel.getX() + 8, 10, 76, 42);
+    decBtn.setBounds (hexPanel.getX() + 8, 56, 76, 40);
 }

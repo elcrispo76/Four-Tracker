@@ -38,6 +38,14 @@ struct EditorState
     juce::uint32 statusTime = 0;
 
     bool hex() const noexcept { return proc.hexMode; }
+
+    /** Channels in use (4, 8 or 16) and the first of the 4 shown (the view follows the cursor). */
+    int numChannels() { return juce::jlimit (1, ft::kNumChannels, engine().numChannels.load()); }
+    int firstVisibleChannel()
+    {
+        cursorCh = juce::jlimit (0, numChannels() - 1, cursorCh);
+        return (cursorCh / ft::kVisibleChannels) * ft::kVisibleChannels;
+    }
     int  selectedInstrument() const noexcept { return proc.selectedInstrument; }
 
     /** The pattern shown in the editor: the playing one while playing. */

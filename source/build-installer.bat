@@ -1,9 +1,11 @@
 @echo off
 rem ===========================================================================
-rem  Four Tracker - builds the installer (dist\FourTracker-Setup-x.y.z.exe)
+rem  Four Tracker - builds the installer
 rem
 rem  Needs: Inno Setup 6.3+ (6.7.3 recommended) or 7 (free): https://jrsoftware.org/isdl.php
-rem  Run build-windows.bat first, so the dist folder holds the program.
+rem  1 / 2: run build-windows.bat first (the program goes in dist)
+rem  3    : run build-windows-fx.bat first (the FX version goes in dist-fx)
+rem  4    : run build-windows-fx-share.bat first (the FX version to share goes in dist-fx-share)
 rem ===========================================================================
 setlocal EnableExtensions
 cd /d "%~dp0"
@@ -13,12 +15,6 @@ echo.
 echo  FOUR TRACKER - INSTALLER
 echo  ========================
 echo.
-
-if exist "dist\64-bit\Four Tracker.exe" goto :haveDist
-echo  [FEJL] dist\64-bit\Four Tracker.exe findes ikke.
-echo         Koer build-windows.bat foerst.
-goto :fail
-:haveDist
 
 set "ISCC="
 for %%V in (6 7) do (
@@ -40,22 +36,41 @@ goto :fail
 echo  Inno Setup: %ISCC%
 echo.
 echo  Hvilken installationsfil vil du lave?
-echo    1 = Til dig selv  (med VST2, hvis den er bygget)
-echo    2 = Til deling    (uden VST2 - kun program og VST3)
+echo    1 = Til dig selv   (med VST2, hvis den er bygget)       - fra mappen dist
+echo    2 = Til deling     (uden VST2 - kun program og VST3)    - fra mappen dist
+echo    3 = FX-version     (til dig selv, VST3 + VST2 effekter)    - fra mappen dist-fx
+echo    4 = FX til deling  (VST3 effekter, ingen VST2)             - fra mappen dist-fx-share
 echo.
-choice /c 12 /n /m "  Tryk 1 eller 2: "
-if errorlevel 2 (set "EDITION=/DSHARE") else (set "EDITION=")
+choice /c 1234 /n /m "  Tryk 1, 2, 3 eller 4: "
+set "PICK=%errorlevel%"
 echo.
+
+set "EDITION="
+set "DISTDIR=dist"
+set "BUILDER=build-windows.bat"
+if "%PICK%"=="2" set "EDITION=/DSHARE"
+if "%PICK%"=="3" set "EDITION=/DFX"
+if "%PICK%"=="3" set "DISTDIR=dist-fx"
+if "%PICK%"=="3" set "BUILDER=build-windows-fx.bat"
+if "%PICK%"=="4" set "EDITION=/DSHARE /DFXSHARE"
+if "%PICK%"=="4" set "DISTDIR=dist-fx-share"
+if "%PICK%"=="4" set "BUILDER=build-windows-fx-share.bat"
+
+if exist "%DISTDIR%\64-bit\Four Tracker.exe" goto :haveDist
+echo  [FEJL] %DISTDIR%\64-bit\Four Tracker.exe findes ikke.
+echo         Koer %BUILDER% foerst.
+goto :fail
+:haveDist
 
 "%ISCC%" %EDITION% "installer\FourTracker.iss"
 if errorlevel 1 goto :fail
 
 echo.
 echo  ===================================================================
-echo   FAERDIG!  Installeren ligger i mappen dist:
-dir /b "dist\FourTracker-Setup-*.exe"
+echo   FAERDIG!  Installeren ligger i mappen %DISTDIR%:
+dir /b "%DISTDIR%\FourTracker-Setup-*.exe"
 echo  ===================================================================
-start "" explorer "%CD%\dist"
+start "" explorer "%CD%\%DISTDIR%"
 goto :end
 
 :fail

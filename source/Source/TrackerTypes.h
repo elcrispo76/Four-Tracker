@@ -11,7 +11,8 @@
 namespace ft
 {
 
-constexpr int kNumChannels    = 4;
+constexpr int kNumChannels    = 16;     // storage for the most channels a song can have (4, 8 or 16 are used)
+constexpr int kVisibleChannels = 4;     // channels shown at a time; the view scrolls sideways
 constexpr int kMaxPatterns    = 64;
 constexpr int kMaxRows        = 256;
 constexpr int kNumInstruments = 17;      // slot 0 means "no instrument"; usable slots are 01..10 (hex)
@@ -75,6 +76,11 @@ juce::String midiNoteName (int midiNote);         // MIDI 36 -> "C-2" (MIDI 60 =
 juce::String formatNumber (int value, int digits, bool hex);
 juce::String hex2 (int v);
 juce::String fxToString (uint8_t fx, uint8_t param);   // "0C40" or "0000"
+
+// Four Tracker sound commands in the effect column, typed as 0X / 0Z / 0Y / 0V
+constexpr uint8_t fxFilterCutoff = 0x22, fxFilterResonance = 0x23, fxDistortion = 0x24, fxAccent = 0x25;
+/** The 00-64 value of a 0X / 0Z / 0Y / 0V command (vv typed as a decimal number). */
+int filterCommandValue (uint8_t param);
 juce::String panToString (int pan);                    // -64..64 -> "L32", "C", "R10"
 juce::String signedToString (int v);                   // "0", "+3", "-5"
 

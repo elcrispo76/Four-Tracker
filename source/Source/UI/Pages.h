@@ -23,6 +23,7 @@ class ChannelStrip : public juce::Component, public Refreshable
 {
 public:
     ChannelStrip (EditorState& s, int channel);
+    void setChannel (int c);   // the strips follow the 4 channels in view
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -47,6 +48,7 @@ public:
     void resized() override;
     void refresh() override;
 private:
+    EditorState& st;
     std::vector<std::unique_ptr<ChannelStrip>> strips;
 };
 
@@ -142,12 +144,18 @@ private:
     juce::Rectangle<int> paramsPanel, togglesPanel, infoPanel, dropBar, slotPanel, slotGrid, header;
 
     // built-in synth
-    SegmentPair source { "SAMPLE", "SYNTH", 17.0f };
+    PixelButton srcSample { "SAMPLE", PixelButton::Style::Segment, 17.0f },
+                srcSynth  { "SYNTH",  PixelButton::Style::Segment, 17.0f },
+                srcMidi   { "MIDI",   PixelButton::Style::Segment, 17.0f };
+    ValueBox midiChannelBox { 1, 16, 1, 30.0f }, midiProgramBox { 0, 128, 0, 30.0f };
+    bool midiMode = false;
     std::array<std::unique_ptr<PixelButton>, 5> waveButtons;
     PixelSlider attack { 0, 5000, 2, 2 }, decay { 0, 5000, 250, 250 }, sustain { 0, 64, 40, 40 }, release { 0, 5000, 200, 200 },
-                cutoff { 0, 127, 127, 127 }, resonance { 0, 127, 0, 0 };
+                cutoff { 0, 127, 127, 127 }, resonance { 0, 127, 0, 0 },
+                distortion { 0, 64, 0, 0 }, accent { 0, 64, 0, 0 };
     bool synthMode = false;
-    void setSource (bool synth);
+    enum Source { srcIsSample, srcIsSynth, srcIsMidi };
+    void setSource (int source);
     void pushSynth();
     void updateSynthVisibility();
 };
@@ -164,6 +172,11 @@ public:
     void resized() override;
     void refresh() override;
     void instrumentsChanged();
+    void mouseDown (const juce::MouseEvent&) override;
+    void visibilityChanged() override;
+
+    /** Ctrl+A / C / X / V (and Delete) for the waveform, once it has been clicked. */
+    bool handleKey (const juce::KeyPress&);
 
 private:
     void pushPoints (const ft::InstrumentParams& p);
@@ -184,7 +197,7 @@ private:
                 setLoop { "SET LOOP", PixelButton::Style::Segment, 17.0f }, playLoop { "PLAY LOOP", PixelButton::Style::Dark, 17.0f };
     SegmentPair loopMode { "FORWARD", "REVERSE", 17.0f };
     PixelButton cut { "CUT" }, copy { "COPY" }, paste { "PASTE" }, fadeIn { "FADE IN" }, fadeOut { "FADE OUT" },
-                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" };
+                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" };
     PixelButton zoomIn { "" }, zoomOut { "" }, fit { "FIT", PixelButton::Style::Raised, 18.0f }, left { "" }, right { "" };
 
     juce::AudioBuffer<float> clip;

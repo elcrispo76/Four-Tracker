@@ -8,6 +8,8 @@
 //   FourTrackerTests <outputDir> [--screens]
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <thread>
+#include <cstdlib>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
@@ -55,6 +57,7 @@ int main (int argc, char** argv)
     ScopedJuceInitialiser_GUI gui;
     const File outDir = argc > 1 ? File::getCurrentWorkingDirectory().getChildFile (argv[1]) : File::getCurrentWorkingDirectory();
     outDir.createDirectory();
+    std::cout << "      sizes: processor " << sizeof (FourTrackerProcessor) << " B, editor " << sizeof (FourTrackerEditor) << " B, engine " << sizeof (ft::TrackerEngine) << " B\n";
     const bool screens = argc > 2 && String (argv[2]) == "--screens";
 
     auto proc = std::make_unique<FourTrackerProcessor>();
@@ -540,7 +543,7 @@ int main (int argc, char** argv)
             {
                 for (auto* ch : c.getChildren())
                 {
-                    if (auto* vb = dynamic_cast<ValueBox*> (ch)) if (vb->getValue() == 4 && vb->getBounds().getX() > 1190 && vb->getBounds().getX() < 1300) return vb;
+                    if (auto* vb = dynamic_cast<ValueBox*> (ch)) if (vb->getValue() == 4 && vb->getBounds().getX() > 1090 && vb->getBounds().getX() < 1199) return vb;
                     if (auto* f = findOct (*ch)) return f;
                 }
                 return nullptr;
@@ -563,6 +566,84 @@ int main (int argc, char** argv)
             CHECK (oct != nullptr && oct->getValue() == 0, "OCTAVE box follows F1/F2");
             ed5->keyPressed (KeyPress (KeyPress::F2Key, ModifierKeys(), 0)); ed5->keyPressed (KeyPress (KeyPress::F2Key, ModifierKeys(), 0));
             ed5->keyPressed (KeyPress (KeyPress::F2Key, ModifierKeys(), 0)); ed5->keyPressed (KeyPress (KeyPress::F2Key, ModifierKeys(), 0));
+        }
+        // SPACING box: the cursor jumps that many rows after a note and with up/down
+        {
+            std::function<ValueBox* (Component&)> findSp = [&] (Component& c) -> ValueBox*
+            {
+                for (auto* ch : c.getChildren())
+                {
+                    if (auto* vb = dynamic_cast<ValueBox*> (ch)) if (vb->getBounds().getX() > 1199 && vb->getBounds().getX() < 1300) return vb;
+                    if (auto* f = findSp (*ch)) return f;
+                }
+                return nullptr;
+            };
+            auto* sp = findSp (*ed5);
+            CHECK (sp != nullptr && sp->getValue() == 1, "SPACING box exists, default 1");
+            if (sp != nullptr) sp->setValue (4, true);
+            ed5->keyPressed (KeyPress (KeyPress::homeKey, ModifierKeys(), 0));
+            ed5->keyPressed (KeyPress ('z', ModifierKeys(), 'z')); ed5->keyStateChanged (false);   // row 0 -> cursor 4
+            ed5->keyPressed (KeyPress ('z', ModifierKeys(), 'z')); ed5->keyStateChanged (false);   // row 4 -> cursor 8
+            ed5->keyPressed (KeyPress (KeyPress::downKey, ModifierKeys(), 0));                     // 8 -> 12
+            ed5->keyPressed (KeyPress ('z', ModifierKeys(), 'z')); ed5->keyStateChanged (false);   // row 12
+            auto& pt = e5.getPattern (0);
+            CHECK (pt.at (4, 0).note != 0 && pt.at (12, 0).note != 0 && pt.at (8, 0).note == 0, "spacing 4: notes land 4 rows apart, the down arrow skips 4 rows");
+            CHECK (pt.at (5, 0).note == 0 && pt.at (6, 0).note == 0 && pt.at (7, 0).note == 0, "spacing 4: rows in between stay empty");
+            ed5->keyPressed (KeyPress (KeyPress::upKey, ModifierKeys(), 0));                       // 16 -> 12
+            ed5->keyPressed (KeyPress (KeyPress::upKey, ModifierKeys(), 0));                       // 12 -> 8
+            ed5->keyPressed (KeyPress ('z', ModifierKeys(), 'z')); ed5->keyStateChanged (false);   // row 8
+            CHECK (pt.at (8, 0).note != 0, "the up arrow also moves 4 rows");
+            ed5->keyPressed (KeyPress (KeyPress::F6Key, ModifierKeys(), 0));
+            MessageManager::getInstance()->runDispatchLoopUntil (40);
+            CHECK (sp != nullptr && sp->getValue() == 3, "SPACING box follows F6/F7");
+            for (int i = 0; i < 40; ++i) ed5->keyPressed (KeyPress (KeyPress::F7Key, ModifierKeys(), 0));
+            MessageManager::getInstance()->runDispatchLoopUntil (40);
+            CHECK (sp != nullptr && sp->getValue() == 32, "SPACING goes up to 32");
+            if (screens && sp != nullptr)
+            {
+                auto img = ed5->createComponentSnapshot (ed5->getLocalBounds(), true, 1.0f);
+                auto file = outDir.getChildFile ("16_spacing32.png"); file.deleteFile();
+                FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+            }
+            if (sp != nullptr) sp->setValue (1, true);
+            for (int r = 2; r < 16; ++r) pt.at (r, 0) = {};
+            // Insert pushes the rest of the track down, Backspace pulls it up, Delete clears and moves on
+            for (int r = 0; r < 16; ++r) pt.at (r, 0) = {};
+            pt.at (0, 0) = { 10, 1, 0, 0 }; pt.at (1, 0) = { 11, 1, 0, 0 }; pt.at (2, 0) = { 12, 1, 0, 0 };
+            ed5->keyPressed (KeyPress (KeyPress::homeKey, ModifierKeys(), 0));
+            ed5->keyPressed (KeyPress (KeyPress::downKey, ModifierKeys(), 0));                     // row 1
+            ed5->keyPressed (KeyPress (KeyPress::insertKey, ModifierKeys(), 0));
+            CHECK (pt.at (0, 0).note == 10 && pt.at (1, 0).note == 0 && pt.at (2, 0).note == 11 && pt.at (3, 0).note == 12,
+                   "Insert pushes the rest of the track down one row");
+            ed5->keyPressed (KeyPress (KeyPress::backspaceKey, ModifierKeys(), 0));
+            CHECK (pt.at (1, 0).note == 11 && pt.at (2, 0).note == 12 && pt.at (3, 0).note == 0, "Backspace pulls the rest of the track up");
+            ed5->keyPressed (KeyPress (KeyPress::deleteKey, ModifierKeys(), 0));                   // clears row 1, cursor -> 2
+            ed5->keyPressed (KeyPress (KeyPress::deleteKey, ModifierKeys(), 0));                   // clears row 2, cursor -> 3
+            CHECK (pt.at (1, 0).note == 0 && pt.at (2, 0).note == 0 && pt.at (0, 0).note == 10, "Delete clears the field and moves down to the next row");
+            for (int r = 0; r < 16; ++r) pt.at (r, 0) = {};
+        }
+        // typing X / Z in the effect number gives the filter commands 0X / 0Z
+        {
+            ed5->keyPressed (KeyPress (KeyPress::homeKey, ModifierKeys(), 0));
+            for (int i = 0; i < 4; ++i) ed5->keyPressed (KeyPress (KeyPress::rightKey, ModifierKeys(), 0));
+            ed5->keyPressed (KeyPress ('x', ModifierKeys(), 'x'));
+            ed5->keyStateChanged (false);
+            ed5->keyPressed (KeyPress ('z', ModifierKeys(), 'z'));
+            ed5->keyStateChanged (false);
+            ed5->keyPressed (KeyPress ('y', ModifierKeys(), 'y'));
+            ed5->keyStateChanged (false);
+            ed5->keyPressed (KeyPress ('v', ModifierKeys(), 'v'));
+            ed5->keyStateChanged (false);
+            bool gotX = false, gotZ = false, gotY = false, gotV = false;
+            for (int r = 0; r < 64; ++r)
+            {
+                const auto fx = e5.getPattern (0).at (r, 0).fx;
+                gotX = gotX || fx == ft::fxFilterCutoff;
+                gotZ = gotZ || fx == ft::fxFilterResonance;
+                gotY = gotY || fx == ft::fxDistortion;
+                gotV = gotV || fx == ft::fxAccent;
+            }
+            CHECK (gotX && gotZ && gotY && gotV, "typing X / Z / Y / V in the effect column enters 0X / 0Z / 0Y / 0V");
         }
         ed5.reset();
     }
@@ -684,6 +765,431 @@ int main (int argc, char** argv)
         edb.reset();
     }
 
+    // MIDI instrument: pattern notes go out as MIDI
+    {
+        auto pm = std::make_unique<FourTrackerProcessor>();
+        pm->prepareToPlay (44100.0, 256);
+        auto& em = pm->getEngine();
+        pm->newPatternSet();
+        auto& in = pm->getInstrument (6);
+        in.makeMidi();
+        in.params.midiChannel = 2; in.params.midiProgram = 5;
+        pm->instrumentChanged (6);
+        CHECK (pm->getInstrument (6).isMidi() && pm->getInstrument (6).name == "MIDI CH 1", "makeMidi makes a MIDI instrument");
+        em.getPattern (0).at (0, 1) = { (uint8_t) ft::kNativeNote, 6, 0x0C, 0x20 };   // C-4, volume 20 -> velocity 63
+        em.getPattern (0).at (2, 1) = { ft::kNoteOff, 0, 0, 0 };
+        em.loopPattern = false;
+        em.requestStart();
+        Array<MidiMessage> out;
+        for (int b = 0; b < 200; ++b)
+        {
+            AudioBuffer<float> buf (2, 256);
+            MidiBuffer mb;
+            pm->processBlock (buf, mb);
+            for (const auto m : mb) out.add (m.getMessage());
+        }
+        bool prog = false, on = false, off = false; int vel = 0;
+        for (auto& m : out)
+        {
+            if (m.isProgramChange() && m.getChannel() == 2 && m.getProgramChangeNumber() == 4) prog = true;
+            if (m.isNoteOn() && m.getChannel() == 2 && m.getNoteNumber() == 60) { on = true; vel = m.getVelocity(); }
+            if (m.isNoteOff() && m.getChannel() == 2 && m.getNoteNumber() == 60 && on) off = true;
+        }
+        CHECK (prog, "MIDI instrument: program change before the first note");
+        CHECK (on && vel == 63, "MIDI instrument: C-4 sends note 60 on channel 2, velocity from 0C20 (" + String (vel) + ")");
+        CHECK (off, "MIDI instrument: === sends note off");
+
+        auto f = outDir.getChildFile ("midi.ftm");
+        pm->saveModule (f);
+        auto p2 = std::make_unique<FourTrackerProcessor>();
+        p2->loadModule (f);
+        CHECK (p2->getInstrument (6).isMidi() && p2->getInstrument (6).params.midiChannel == 2 && p2->getInstrument (6).params.midiProgram == 5,
+               "MIDI instrument settings are saved in modules");
+        if (screens)
+        {
+            pm->selectedInstrument = 6;
+            std::unique_ptr<AudioProcessorEditor> edm (pm->createEditor());
+            edm->setSize (1536, 1024);
+            std::function<Button* (Component&, const String&)> fb = [&] (Component& c, const String& t) -> Button*
+            {
+                for (auto* ch : c.getChildren()) { if (auto* b = dynamic_cast<PixelButton*> (ch)) if (b->getButtonText() == t) return b; if (auto* x = fb (*ch, t)) return x; }
+                return nullptr;
+            };
+            if (auto* b = fb (*edm, "INSTRUMENTS")) b->triggerClick();
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            auto img = edm->createComponentSnapshot (edm->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("15_midi_instrument.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+            edm.reset();
+        }
+    }
+
+    // 4 / 8 / 16 channels
+    {
+        auto pc = std::make_unique<FourTrackerProcessor>();
+        pc->prepareToPlay (44100.0, 256);
+        Runner rc { *pc };
+        auto& ec = pc->getEngine();
+        CHECK (pc->getNumChannels() == 4, "starts with 4 channels");
+        pc->setNumChannels (8);
+        CHECK (pc->getNumChannels() == 8, "8 channels");
+        // a kick on channel 7 only (channels 1-4 muted)
+        for (int c = 0; c < 4; ++c) ec.mix[c].mute = true;
+        ec.getPattern (0).at (0, 6) = { (uint8_t) ft::kNativeNote, 1, 0, 0 };
+        ec.requestStart();
+        rc.run (40);
+        float pk = 0; for (int i = rc.written - 40 * Runner::block; i < rc.written; ++i) pk = jmax (pk, std::abs (rc.all.getSample (0, i)));
+        CHECK (pk > 0.05f, "channel 7 plays in an 8-channel song");
+        ec.requestStop(); rc.run (2);
+
+        auto f = outDir.getChildFile ("eight.ftm");
+        pc->saveModule (f);
+        auto p2 = std::make_unique<FourTrackerProcessor>();
+        CHECK (p2->loadModule (f).isEmpty() && p2->getNumChannels() == 8 && p2->getEngine().getPattern (0).at (0, 6).note == ft::kNativeNote,
+               "an 8-channel module loads with 8 channels and its notes");
+        // an old 4-channel module (written before channel counts) still loads as 4 channels
+        {
+            auto p4 = std::make_unique<FourTrackerProcessor>();
+            p4->setNumChannels (16);
+            p4->loadModule (outDir.getChildFile ("test.ftm"));
+            CHECK (p4->getNumChannels() == 4 || outDir.getChildFile ("test.ftm").existsAsFile() == false, "a module saved with 4 channels loads as 4");
+        }
+        // fewer channels clears the ones beyond
+        pc->setNumChannels (4);
+        CHECK (pc->getEngine().getPattern (0).at (0, 6).isEmpty(), "going back to 4 channels clears channels 5-8");
+
+        // editor: + / - TRACK, and the view pages sideways
+        pc->setNumChannels (4);
+        std::unique_ptr<AudioProcessorEditor> edc (pc->createEditor());
+        edc->setSize (1536, 1024);
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        std::function<Component* (Component&, std::function<bool (Component&)>)> findC2 =
+            [&] (Component& c, std::function<bool (Component&)> pred) -> Component*
+        {
+            for (auto* ch : c.getChildren()) { if (pred (*ch)) return ch; if (auto* fnd = findC2 (*ch, pred)) return fnd; }
+            return nullptr;
+        };
+        auto* tc = findC2 (*edc, [] (Component& c) { return dynamic_cast<TrackCount*> (&c) != nullptr; });
+        auto btn = [&] (const String& t) { return dynamic_cast<Button*> (tc ? findC2 (*tc, [t] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == t; }) : nullptr); };
+        CHECK (tc != nullptr && btn ("+") && btn ("-"), "title bar has - TRACKS +");
+        for (int i = 0; i < 3; ++i) if (auto* b = btn ("+")) b->onClick();
+        CHECK (pc->getNumChannels() == 7, "+ adds one track at a time (7)");
+        pc->getEngine().getPattern (0).at (5, 6) = { 30, 2, 0, 0 };
+        if (auto* b = btn ("-")) b->onClick();
+        CHECK (pc->getNumChannels() == 7, "- on a track with notes asks first");
+        if (auto* b = btn ("-")) b->onClick();
+        CHECK (pc->getNumChannels() == 6, "- again removes it");
+        if (auto* b = btn ("+")) b->onClick();
+        if (auto* b = btn ("+")) b->onClick();
+        CHECK (pc->getNumChannels() == 8, "back to 8 tracks");
+        for (int i = 0; i < 20; ++i) if (auto* b = btn ("+")) b->onClick();
+        CHECK (pc->getNumChannels() == 16, "16 tracks is the most");
+        pc->setNumChannels (8);
+        edc->keyPressed (KeyPress (KeyPress::homeKey));
+        for (int i = 0; i < 4; ++i) edc->keyPressed (KeyPress (KeyPress::tabKey));   // to track 5
+        pc->getEngine().getPattern (0).at (0, 4) = { 30, 2, 0, 0 };
+        MessageManager::getInstance()->runDispatchLoopUntil (120);
+        if (screens)
+        {
+            auto img = edc->createComponentSnapshot (edc->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("14_channels_5_8.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        auto* strip = findC2 (*edc, [] (Component& c) { return dynamic_cast<ChannelStrip*> (&c) != nullptr; });
+        CHECK (strip != nullptr, "channel strips exist");
+
+        // the < 1-4 5-8 ... > bar under the pattern
+        auto* nav = dynamic_cast<TrackNav*> (findC2 (*edc, [] (Component& c) { return dynamic_cast<TrackNav*> (&c) != nullptr; }));
+        auto navBtn = [&] (const String& t) { return dynamic_cast<PixelButton*> (nav ? findC2 (*nav, [t] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->isVisible() && b->getButtonText() == t; }) : nullptr); };
+        auto navArrow = [&] (bool right) { PixelButton* found = nullptr; int x = right ? -1 : 99999;
+            if (nav) for (auto* c : nav->getChildren()) if (auto* b = dynamic_cast<PixelButton*> (c)) if (b->getButtonText().isEmpty() && (right ? b->getX() > x : b->getX() < x)) { x = b->getX(); found = b; }
+            return found; };
+        CHECK (nav != nullptr && nav->isVisible(), "track bar shows under the pattern with 8 tracks");
+        CHECK (navBtn ("TRACKS 1-4") != nullptr && navBtn ("TRACKS 1-4")->getToggleState(), "track bar marks 1-4 as shown");
+        if (auto* b = navArrow (true)) b->onClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (navBtn ("5-8") != nullptr && navBtn ("5-8")->getToggleState(), "> goes on to tracks 5-8");
+        if (auto* b = navArrow (false)) b->onClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (navBtn ("TRACKS 1-4") != nullptr && navBtn ("TRACKS 1-4")->getToggleState(), "< goes back to tracks 1-4");
+        pc->setNumChannels (14);
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        if (auto* b = navBtn ("9-12")) b->onClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (navBtn ("9-12") != nullptr && navBtn ("9-12")->getToggleState(), "clicking 9-12 shows tracks 9-12");
+        if (auto* b = navArrow (true)) b->onClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (navBtn ("13-14") != nullptr && navBtn ("13-14")->getToggleState(), "> goes on to tracks 13-14");
+        if (screens)
+        {
+            auto img = edc->createComponentSnapshot (edc->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("15_track_bar.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        pc->setNumChannels (4);
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        CHECK (nav->isVisible() && navBtn ("TRACKS 1-4") != nullptr && navBtn ("5-8") == nullptr, "with 4 tracks the bar shows only TRACKS 1-4");
+        edc.reset();
+    }
+
+    // Sample Edit shortcuts: click the waveform, then Ctrl+A / C / V / X / Delete
+    {
+        auto pk = std::make_unique<FourTrackerProcessor>();
+        pk->prepareToPlay (44100.0, 256);
+        pk->selectedInstrument = 1;                                   // KICK.WAV, 22050 frames
+        std::unique_ptr<AudioProcessorEditor> edk (pk->createEditor());
+        edk->setSize (1536, 1024);
+        std::function<Component* (Component&, std::function<bool (Component&)>)> findK =
+            [&] (Component& c, std::function<bool (Component&)> pred) -> Component*
+        {
+            for (auto* ch : c.getChildren()) { if (pred (*ch)) return ch; if (auto* f = findK (*ch, pred)) return f; }
+            return nullptr;
+        };
+        if (auto* tab = dynamic_cast<Button*> (findK (*edk, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "SAMPLE EDIT"; })))
+            tab->triggerClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (30);
+        auto* page = findK (*edk, [] (Component& c) { return dynamic_cast<SampleEditPage*> (&c) != nullptr; });
+        auto* wv = page ? dynamic_cast<WaveformView*> (findK (*page, [] (Component& c) { return dynamic_cast<WaveformView*> (&c) != nullptr; })) : nullptr;
+        const auto ctrl = ModifierKeys (ModifierKeys::commandModifier);
+        auto len = [&] { return pk->getInstrument (1).data->getLength(); };
+        const int len0 = len();
+
+        edk->keyPressed (KeyPress ('a', ctrl, 0));
+        CHECK (wv != nullptr && ! wv->hasSelection(), "Ctrl+A does nothing before the waveform is clicked");
+        if (wv && wv->onActivated) wv->onActivated();                 // = a click on the waveform
+        edk->keyPressed (KeyPress ('a', ctrl, 0));
+        CHECK (wv && wv->hasSelection() && wv->getSelectionStart() == 0 && wv->getSelectionEnd() == len0 - 1, "Ctrl+A selects the whole sample");
+        edk->keyPressed (KeyPress ('c', ctrl, 0));
+        if (wv) wv->clearSelection();
+        edk->keyPressed (KeyPress ('v', ctrl, 0));
+        CHECK (len() == len0 * 2, "Ctrl+C then Ctrl+V pastes a copy (" + String (len()) + ")");
+        if (wv) wv->setSelection (0, len0 - 1);
+        edk->keyPressed (KeyPress ('x', ctrl, 0));
+        CHECK (len() == len0, "Ctrl+X cuts the selection");
+        if (wv) wv->setSelection (0, 999);
+        edk->keyPressed (KeyPress (KeyPress::deleteKey));
+        CHECK (len() == len0 - 1000, "Delete removes the selection");
+        edk.reset();
+    }
+
+    // MIX in Sample Edit: another slot's sample mixed in at a position
+    {
+        ft::Instrument a, b;
+        ft::SampleData::Ptr da = new ft::SampleData(); da->sampleRate = 44100; da->buffer.setSize (1, 1000); da->buffer.clear();
+        for (int i = 0; i < 1000; ++i) da->buffer.setSample (0, i, 0.25f);
+        a.data = da; a.resetPoints();
+        ft::SampleData::Ptr db = new ft::SampleData(); db->sampleRate = 22050; db->buffer.setSize (2, 600);
+        for (int i = 0; i < 600; ++i) { db->buffer.setSample (0, i, 0.5f); db->buffer.setSample (1, i, -0.5f); }
+        b.data = db; b.resetPoints();
+        CHECK (a.mixIn (b, 500), "mixIn works");
+        // 600 frames at 22050 Hz = 1199 frames at 44100 Hz, starting at 500 -> length 1699, stereo
+        CHECK (a.data->getNumChannels() == 2 && std::abs (a.data->getLength() - 1699) <= 1, "MIX: longer and stereo (" + String (a.data->getLength()) + ")");
+        CHECK (std::abs (a.data->buffer.getSample (0, 100) - 0.25f) < 1e-4f && std::abs (a.data->buffer.getSample (0, 800) - 0.75f) < 1e-3f
+               && std::abs (a.data->buffer.getSample (1, 800) + 0.25f) < 1e-3f && std::abs (a.data->buffer.getSample (0, 1500) - 0.5f) < 1e-3f,
+               "MIX: both samples are summed from the position");
+        CHECK (a.params.end == a.data->getLength() - 1, "MIX: end point follows the longer sample");
+        ft::Instrument c; c.data = da; c.resetPoints();
+        ft::Instrument loud; ft::SampleData::Ptr dl = new ft::SampleData(); dl->buffer.setSize (1, 1000);
+        for (int i = 0; i < 1000; ++i) dl->buffer.setSample (0, i, 0.9f);
+        loud.data = dl; loud.resetPoints();
+        c.mixIn (loud, 0);
+        CHECK (c.data->buffer.getMagnitude (0, c.data->getLength()) <= 1.0f, "MIX: scaled down instead of clipping");
+    }
+
+   #if FOURTRACKER_FX_HOST
+    // FX build: scan a folder, load a VST3 into a channel slot, bypass, settings survive a restart
+    {
+        auto vstDir = File (argc > 3 ? String (argv[3]) : String());
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Standalone);
+        auto pf = std::make_unique<FourTrackerProcessor>();
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+        auto* host = pf->getFxHost();
+        CHECK (host != nullptr, "FX build: standalone has an FX host");
+        pf->prepareToPlay (44100.0, 256);
+        Runner rf { *pf };
+        auto& ef = pf->getEngine();
+
+        auto peakCh = [&] (int blocks)
+        {
+            const int start = rf.written;
+            rf.run (blocks);
+            float pk = 0;
+            for (int i = start; i < rf.written; ++i) pk = jmax (pk, std::abs (rf.all.getSample (0, i)));
+            return pk;
+        };
+
+        // pattern 00 of the demo: only channel 1 (kick) plays when the other channels are muted
+        for (int c = 1; c < 4; ++c) ef.mix[c].mute = true;
+        ef.requestStart();
+        const float dry = peakCh (120);
+        CHECK (dry > 0.05f, "FX build: channel 1 plays dry (" + String (dry, 3) + ")");
+
+        // the scan report explains plugins it could not use (wrong bitness, no VST2 support)
+        if (host != nullptr)
+        {
+            auto dir = outDir.getChildFile ("fake-plugins");
+            dir.deleteRecursively();
+            dir.createDirectory();
+            auto makePE = [] (const File& f, int machine)
+            {
+                MemoryOutputStream m;
+                m.writeShort (0x5a4d);
+                for (int i = 2; i < 0x3c; ++i) m.writeByte (0);
+                m.writeInt (0x40);
+                m.writeInt (0x00004550);
+                m.writeShort ((short) machine);
+                for (int i = 0; i < 64; ++i) m.writeByte (0);
+                f.replaceWithData (m.getData(), m.getDataSize());
+            };
+            makePE (dir.getChildFile ("Old32bitDelay.dll"), 0x14c);
+            makePE (dir.getChildFile ("Modern64bitReverb.dll"), 0x8664);
+            host->getSearchPath() = FileSearchPath (dir.getFullPathName());
+            host->startScan();
+            for (int i = 0; i < 200 && host->isScanning(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (20);
+            const auto rep = host->getScanReport();
+            std::cout << "      scan report: " << rep << "\n";
+            CHECK (rep.contains ("1 ARE 32-BIT"), "FX build: report finds the 32-bit plugin");
+            CHECK (host->getFormatNames().contains ("VST2") || rep.contains (".DLL SKIPPED"),
+                   "FX build: report says when VST2 support is missing");
+        }
+
+        if (host != nullptr && vstDir.isDirectory())
+        {
+            host->getSearchPath() = FileSearchPath (vstDir.getFullPathName());
+            host->startScan();
+            for (int i = 0; i < 400 && host->isScanning(); ++i) MessageManager::getInstance()->runDispatchLoopUntil (20);
+            CHECK (! host->isScanning(), "FX build: scan finishes");
+            // the test plugin is Four Tracker itself (an instrument), so it is not offered as an effect
+            CHECK (host->getEffects().isEmpty(), "FX build: instruments are left out of the effect list");
+
+            KnownPluginList kl;
+            OwnedArray<PluginDescription> found;
+            AudioPluginFormatManager fm; fm.addDefaultFormats();
+            for (auto* f : fm.getFormats())
+                for (auto& file : f->searchPathsForPlugins (FileSearchPath (vstDir.getFullPathName()), true))
+                    kl.scanAndAddFile (file, true, found, *f);
+            CHECK (found.size() > 0, "FX build: test VST3 found");
+            if (found.size() > 0)
+            {
+                // an instrument in the insert replaces the channel with its own (silent) output
+                const auto err = host->loadSlot (0, 0, *found[0]);
+                CHECK (err.isEmpty() && host->hasPlugin (0, 0), "FX build: plugin loads into CH1 FX1 " + err);
+                const float wet = peakCh (120);
+                CHECK (wet < 0.001f, "FX build: CH1 audio goes through the plugin (" + String (wet, 4) + ")");
+                host->setBypass (0, 0, true);
+                const float byp = peakCh (120);
+                CHECK (byp > 0.05f, "FX build: BYPASS gives the dry sound back");
+                host->setBypass (0, 0, false);
+
+                // settings file: a new FX host restores the slot after prepare
+                host->saveSettings();
+                ef.requestStop();
+                rf.run (2);
+                pf.reset();
+                AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Standalone);
+                auto pf2 = std::make_unique<FourTrackerProcessor>();
+                AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+                pf2->prepareToPlay (44100.0, 256);
+                for (int i = 0; i < 20 && ! pf2->getFxHost()->hasPlugin (0, 0); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50);
+                CHECK (pf2->getFxHost()->hasPlugin (0, 0) && pf2->getFxHost()->getSlotName (0, 0) == found[0]->name,
+                       "FX build: CH1 FX1 is restored after a restart");
+
+                if (screens)
+                {
+                    std::unique_ptr<AudioProcessorEditor> edf (pf2->createEditor());
+                    edf->setSize (1536, 1024);
+                    MessageManager::getInstance()->runDispatchLoopUntil (80);
+                    {
+                        auto img0 = edf->createComponentSnapshot (edf->getLocalBounds(), true, 1.0f);
+                        auto f0 = outDir.getChildFile ("12_fx_tracks.png");
+                        f0.deleteFile();
+                        FileOutputStream fos0 (f0);
+                        PNGImageFormat().writeImageToStream (img0, fos0);
+                    }
+                    edf->keyPressed (KeyPress (KeyPress::F8Key));
+                    MessageManager::getInstance()->runDispatchLoopUntil (80);
+                    auto img = edf->createComponentSnapshot (edf->getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("11_fx.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                    edf.reset();
+                }
+                // the FX bar on the tracks page: ON/OFF bypass button, and Enter still starts the pattern
+                {
+                    std::unique_ptr<AudioProcessorEditor> edb (pf2->createEditor());
+                    edb->setSize (1536, 1024);
+                    MessageManager::getInstance()->runDispatchLoopUntil (60);
+                    std::function<Button* (Component&)> findOn = [&] (Component& c) -> Button*
+                    {
+                        for (auto* ch : c.getChildren())
+                        {
+                            if (auto* b = dynamic_cast<PixelButton*> (ch))
+                                if (b->getButtonText() == "ON" && b->isEnabled() && dynamic_cast<FxBar*> (b->getParentComponent()) != nullptr) return b;
+                            if (auto* f = findOn (*ch)) return f;
+                        }
+                        return nullptr;
+                    };
+                    auto* onBtn = findOn (*edb);
+                    CHECK (onBtn != nullptr && ! onBtn->getWantsKeyboardFocus(), "FX bar has an ON/OFF button that doesn't take the keyboard");
+                    if (onBtn && onBtn->onClick) onBtn->onClick();
+                    CHECK (pf2->getFxHost()->isBypassed (0, 0), "FX bar ON/OFF bypasses the effect");
+                    if (onBtn && onBtn->onClick) onBtn->onClick();
+                    CHECK (! pf2->getFxHost()->isBypassed (0, 0), "...and switches it on again");
+                    const bool before = pf2->getEngine().playing.load();
+                    edb->keyPressed (KeyPress (KeyPress::returnKey));
+                    AudioBuffer<float> tmp (2, 256); MidiBuffer mb; pf2->processBlock (tmp, mb);
+                    CHECK (pf2->getEngine().playing.load() != before, "Enter starts the pattern on the tracks page with the FX bar");
+                    pf2->getEngine().requestStop(); pf2->processBlock (tmp, mb);
+                    edb.reset();
+                }
+                // chaining: CH2 > INTO CH1 FX, loops refused, the drop-downs under the pattern
+                {
+                    auto* h = pf2->getFxHost();
+                    h->setRoute (1, 0);
+                    CHECK (h->getRoute (1) == 0, "FX chaining: CH2 can go into CH1's effects");
+                    h->setRoute (0, 1);
+                    CHECK (h->getRoute (0) == -1, "FX chaining: a loop (CH1 into CH2 into CH1) is refused");
+                    h->setRoute (2, 2);
+                    CHECK (h->getRoute (2) == -1, "FX chaining: a channel can't go into itself");
+                    std::unique_ptr<AudioProcessorEditor> edr (pf2->createEditor());
+                    edr->setSize (1536, 1024);
+                    MessageManager::getInstance()->runDispatchLoopUntil (60);
+                    std::function<Component* (Component&, std::function<bool (Component&)>)> findR =
+                        [&] (Component& c, std::function<bool (Component&)> pred) -> Component*
+                    {
+                        for (auto* ch : c.getChildren()) { if (pred (*ch)) return ch; if (auto* f = findR (*ch, pred)) return f; }
+                        return nullptr;
+                    };
+                    auto* rb = dynamic_cast<RouteBar*> (findR (*edr, [] (Component& c) { return dynamic_cast<RouteBar*> (&c) != nullptr; }));
+                    CHECK (rb != nullptr && rb->isVisible(), "FX chaining: drop-downs under the pattern on the tracks page");
+                    auto boxWith = [&] (const String& prefix) { return dynamic_cast<ComboBox*> (rb ? findR (*rb, [prefix] (Component& c) { auto* b = dynamic_cast<ComboBox*> (&c); return b && b->isVisible() && b->getText().startsWith (prefix); }) : nullptr); };
+                    auto* b2 = boxWith ("CH2 >");
+                    CHECK (b2 != nullptr && b2->getText() == "CH2 > INTO CH1 FX" && ! b2->getWantsKeyboardFocus(), "FX chaining: CH2's list shows INTO CH1 FX");
+                    if (auto* b3 = boxWith ("CH3 >")) b3->setSelectedId (1 + 2, sendNotificationSync);   // CH3 > INTO CH2 FX
+                    CHECK (h->getRoute (2) == 1, "FX chaining: picking INTO CH2 FX in CH3's list chains it");
+                    if (screens)
+                    {
+                        auto img = edr->createComponentSnapshot (edr->getLocalBounds(), true, 1.0f);
+                        auto file = outDir.getChildFile ("17_fx_chain.png"); file.deleteFile();
+                        FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+                    }
+                    edr.reset();
+                    pf2->setNumChannels (8);
+                    h->setRoute (5, 0); h->setRoute (3, 6);
+                    pf2->setNumChannels (4);
+                    CHECK (h->getRoute (5) == -1 && h->getRoute (3) == -1, "FX chaining: removing tracks removes their chaining");
+                }
+                pf2->clearAllEffects();
+                CHECK (! pf2->getFxHost()->hasPlugin (0, 0), "FX build: NEW MODULE / Empty removes the effects");
+                CHECK (pf2->getFxHost()->getRoute (1) == -1 && pf2->getFxHost()->getRoute (2) == -1, "FX build: NEW MODULE / Empty removes the chaining too");
+                pf2.reset();
+            }
+        }
+        if (pf != nullptr) { pf->getEngine().requestStop(); rf.run (2); pf.reset(); }
+    }
+   #endif
+
     // built-in synth: 5 waveforms, ADSR, resonant low-pass filter
     {
         auto ps = std::make_unique<FourTrackerProcessor>();
@@ -780,6 +1286,92 @@ int main (int argc, char** argv)
         for (int i = 0; i < rs.written; ++i) finite = finite && std::isfinite (rs.all.getSample (0, i));
         CHECK (finite && reso > 0.0, "high resonance stays stable");
 
+        // live: moving CUTOFF while a note is held changes the sound straight away
+        auto hf = [&] (int fromSample, int toSample)
+        {
+            double e = 0;
+            for (int i = fromSample; i < toSample; ++i)
+            {
+                const float d = rs.all.getSample (0, i) - rs.all.getSample (0, i - 1);
+                e += d * d;
+            }
+            return e;
+        };
+        {
+            auto& in = ps->getInstrument (3);
+            in.params.attack = 0; in.params.decay = 0; in.params.sustain = 64; in.params.cutoff = 127; in.params.resonance = 0;
+            ps->instrumentChanged (3);
+            es.requestPreview (3, ft::kNativeNote + 12);
+            rs.run (40);
+            const int a = rs.written; rs.run (20); const double before = hf (a, rs.written);
+            in.params.cutoff = 30;                       // the slider moves while the key is held
+            ps->instrumentChanged (3);
+            rs.run (20);
+            const int b = rs.written; rs.run (20); const double after = hf (b, rs.written);
+            CHECK (after < before * 0.1, "live: CUTOFF slider is heard on the held note (" + String (after / before, 3) + ")");
+            es.requestStopPreview();
+            rs.run (60);
+            in.params.cutoff = 127; ps->instrumentChanged (3);
+        }
+
+        // DISTORTION adds harmonics, ACCENT makes the note start louder
+        {
+            auto& in = ps->getInstrument (1);                   // sine
+            in.params.attack = 0; in.params.decay = 0; in.params.sustain = 64; in.params.cutoff = 127; in.params.resonance = 0;
+            in.params.distortion = 0; in.params.accent = 0;
+            ps->instrumentChanged (1);
+            es.requestPreview (1, ft::kNativeNote);
+            rs.run (30);
+            const int a = rs.written; rs.run (20); const double clean = hf (a, rs.written);
+            in.params.distortion = 64; ps->instrumentChanged (1);
+            rs.run (20);
+            const int b = rs.written; rs.run (20); const double driven = hf (b, rs.written);
+            CHECK (driven > clean * 4.0, "DISTORTION adds harmonics (" + String (driven / clean, 1) + "x)");
+            es.requestStopPreview(); rs.run (60);
+            in.params.distortion = 0;
+
+            in.params.accent = 64; ps->instrumentChanged (1);
+            const int c0 = rs.written;
+            es.requestPreview (1, ft::kNativeNote);
+            rs.run (100);
+            float early = 0, late = 0;
+            for (int i = c0 + 200; i < c0 + 2400; ++i)   early = jmax (early, std::abs (rs.all.getSample (0, i)));
+            for (int i = c0 + 20000; i < c0 + 24000; ++i) late = jmax (late, std::abs (rs.all.getSample (0, i)));
+            CHECK (early > late * 1.25f, "ACCENT: the note starts louder (" + String (early, 2) + " vs " + String (late, 2) + ")");
+            es.requestStopPreview(); rs.run (60);
+            in.params.accent = 0; ps->instrumentChanged (1);
+        }
+
+        // pattern commands: 0Xvv cutoff and 0Zvv resonance, vv = 00-64
+        {
+            auto& pat = es.getPattern (1);
+            pat.at (0, 0)  = { (uint8_t) (ft::kNativeNote + 12), 3, 0, 0 };   // saw, open
+            pat.at (16, 0) = { 0, 0, ft::fxFilterCutoff, 0x08 };              // 0X08: dark
+            pat.at (17, 0) = { 0, 0, ft::fxFilterResonance, 0x30 };           // 0Z30
+            pat.at (32, 0) = { 0, 0, ft::fxFilterCutoff, 0x64 };              // 0X64: open
+            es.loopPattern = true;
+            es.requestPattern (1);
+            rs.run (2);
+            const int rowSamples = (int) (6 * 44100.0 * 2.5 / 125.0);
+            const int start = rs.written;
+            es.requestStart();
+            rs.run ((rowSamples * 40) / Runner::block + 4);
+            const double open1  = hf (start + rowSamples * 8,  start + rowSamples * 14);
+            const double closed = hf (start + rowSamples * 22, start + rowSamples * 28);
+            const double open2  = hf (start + rowSamples * 34, start + rowSamples * 39);
+            CHECK (closed < open1 * 0.1 && open2 > open1 * 0.5,
+                   "0X08 closes and 0X64 reopens the filter during playback (" + String (closed / open1, 3) + ", " + String (open2 / open1, 2) + ")");
+            CHECK (ft::fxToString (ft::fxFilterCutoff, 0x64) == "0X64" && ft::fxToString (ft::fxFilterResonance, 0x10) == "0Z10"
+                   && ft::fxToString (ft::fxDistortion, 0x32) == "0Y32" && ft::fxToString (ft::fxAccent, 0x00) == "0V00",
+                   "sound commands are shown as 0X / 0Z / 0Y / 0V");
+            CHECK (ft::filterCommandValue (0x64) == 64 && ft::filterCommandValue (0x99) == 64 && ft::filterCommandValue (0x32) == 32,
+                   "0X/0Z values are read as decimal 00-64");
+            es.requestStop();
+            es.requestPattern (0);
+            rs.run (4);
+            pat.clear();
+        }
+
         // pattern playback with a note-off
         {
             auto& pat = es.getPattern (0);
@@ -804,13 +1396,15 @@ int main (int argc, char** argv)
         {
             auto& in = ps->getInstrument (3);
             in.params.cutoff = 55; in.params.resonance = 99; in.params.attack = 123; in.params.release = 456;
+            in.params.distortion = 33; in.params.accent = 44;
             ps->instrumentChanged (3);
             auto f = outDir.getChildFile ("synth.ftm");
             CHECK (ps->saveModule (f), "module with synths saves");
             auto p2 = std::make_unique<FourTrackerProcessor>();
             CHECK (p2->loadModule (f).isEmpty(), "module with synths loads");
             const auto& q = p2->getInstrument (3).params;
-            CHECK (q.synth && q.synthWave == ft::waveSaw && q.cutoff == 55 && q.resonance == 99 && q.attack == 123 && q.release == 456,
+            CHECK (q.synth && q.synthWave == ft::waveSaw && q.cutoff == 55 && q.resonance == 99 && q.attack == 123 && q.release == 456
+                   && q.distortion == 33 && q.accent == 44,
                    "module keeps waveform, envelope and filter");
         }
 
@@ -854,6 +1448,48 @@ int main (int argc, char** argv)
         }
     }
 
+    // FX chaining: a channel's sound can go on into another channel's effects
+    {
+        auto pr = std::make_unique<FourTrackerProcessor>();
+        pr->prepareToPlay (44100.0, Runner::block);
+        auto& er = pr->getEngine();
+        std::array<double, ft::kNumChannels> energy {};
+        std::array<float, ft::kNumChannels> gain; gain.fill (1.0f);
+        std::array<int, ft::kNumChannels> route; route.fill (-1);
+        er.channelInsert = [&] (int ch, float* l, float* rr, int n)
+        {
+            for (int i = 0; i < n; ++i) { energy[(size_t) ch] += (double) l[i] * l[i] + (double) rr[i] * rr[i]; l[i] *= gain[(size_t) ch]; rr[i] *= gain[(size_t) ch]; }
+        };
+        er.channelRoute = [&] (int ch) { return route[(size_t) ch]; };
+        auto play = [&] (double& outEnergy)
+        {
+            energy.fill (0.0);
+            er.requestPattern (0);
+            if (! er.playing.load()) er.requestStartStop();
+            Runner rr { *pr };
+            rr.run (400);
+            er.requestStop(); rr.run (2);
+            outEnergy = 0.0;
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < rr.all.getNumSamples(); ++i) outEnergy += (double) rr.all.getSample (c, i) * rr.all.getSample (c, i);
+        };
+        double outPlain = 0, outChained = 0, outLoop = 0;
+        play (outPlain);
+        const double e0 = energy[0], e1 = energy[1];
+        CHECK (e0 > 0.0 && e1 > 0.0, "chaining test: channels 1 and 2 both play");
+        route[1] = 0;                                   // CH2 > INTO CH1 FX
+        play (outChained);
+        CHECK (energy[1] > 0.5 * e1 && energy[0] > e0 * 1.05, "CH2 chained into CH1: CH2's own effects still run, then CH1's effects get CH2's sound too");
+        gain[0] = 0.0f;                                 // CH1's "effect" silences: CH2 must go silent with it
+        double outMuted = 0; play (outMuted);
+        gain[0] = 1.0f; route[1] = -1;
+        double outMutedPlain = 0; gain[0] = 0.0f; play (outMutedPlain); gain[0] = 1.0f;
+        CHECK (outMuted < outMutedPlain * 0.9, "CH2 chained into CH1 goes through CH1's effects (quieter when CH1's effect silences)");
+        route[0] = 1; route[1] = 0;                     // a loop is ignored, nothing hangs
+        play (outLoop);
+        CHECK (outLoop > 0.0, "a chaining loop is ignored (the sound still comes out)");
+        er.channelInsert = nullptr; er.channelRoute = nullptr;
+    }
+
     if (screens)
     {
         std::unique_ptr<AudioProcessorEditor> ed (proc->createEditor());
@@ -895,6 +1531,51 @@ int main (int argc, char** argv)
             if (i == 0) { e.requestStop(); r.run (2); }
         }
         ed.reset();
+    }
+
+    // soak: a standalone-like session with audio running on its own thread (FT_SOAK=1)
+    if (std::getenv ("FT_SOAK") != nullptr)
+    {
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Standalone);
+        auto ps2 = std::make_unique<FourTrackerProcessor>();
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+        ps2->prepareToPlay (48000.0, 480);
+        std::atomic<bool> run { true };
+        std::thread audio ([&]
+        {
+            AudioBuffer<float> buf (2, 480);
+            while (run.load())
+            {
+                MidiBuffer mb;
+                ps2->processBlock (buf, mb);
+                std::this_thread::sleep_for (std::chrono::milliseconds (5));
+            }
+        });
+        std::unique_ptr<AudioProcessorEditor> eds2 (ps2->createEditor());
+        eds2->setSize (1536, 1024);
+        MessageManager::getInstance()->runDispatchLoopUntil (500);
+        ps2->setNumChannels (16);
+        MessageManager::getInstance()->runDispatchLoopUntil (500);
+        eds2->keyPressed (KeyPress (KeyPress::returnKey));
+        for (int i = 0; i < 20; ++i)
+        {
+            eds2->keyPressed (KeyPress (KeyPress::tabKey));
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+        }
+        const char* tabs[] = { "INSTRUMENTS", "SAMPLE EDIT", "SONG / PATTERN", "BLOCK", "MIDI / AUDIO", "" };
+        std::function<Button* (Component&, const String&)> ft2 = [&] (Component& c, const String& t) -> Button*
+        {
+            for (auto* ch : c.getChildren()) { if (auto* b = dynamic_cast<PixelButton*> (ch)) if (b->getButtonText() == t && b->getHeight() == 66) return b; if (auto* x = ft2 (*ch, t)) return x; }
+            return nullptr;
+        };
+        for (auto* t : tabs) { if (auto* b = ft2 (*eds2, t)) b->triggerClick(); MessageManager::getInstance()->runDispatchLoopUntil (300); }
+        eds2->keyPressed (KeyPress (KeyPress::F8Key));
+        MessageManager::getInstance()->runDispatchLoopUntil (1500);
+        run = false;
+        audio.join();
+        eds2.reset();
+        ps2.reset();
+        CHECK (true, "soak: standalone session with audio thread survived");
     }
 
     proc.reset();

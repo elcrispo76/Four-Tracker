@@ -33,6 +33,9 @@ public:
     std::function<void (const ft::InstrumentParams&)> onPointsChanged;
     std::function<void()> onCursorChanged;
     std::function<void()> onClicked;    // non-interactive mode
+    std::function<void()> onActivated;  // interactive mode: clicked, so keyboard shortcuts apply to it
+    void setKeysActive (bool a) { if (a != keysActive) { keysActive = a; repaint(); } }
+    bool areKeysActive() const noexcept { return keysActive; }
     bool showMarkers = true;
     float lineThickness = 1.4f;
 
@@ -55,6 +58,7 @@ private:
     void rebuildCache();
 
     bool interactive;
+    bool keysActive = false;
     ft::SampleData::Ptr data;
     ft::InstrumentParams params;
     bool hasParams = false;

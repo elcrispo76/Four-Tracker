@@ -32,7 +32,23 @@ juce::String formatNumber (int value, int digits, bool hex)
 
 juce::String hex2 (int v) { return juce::String::toHexString (v & 0xff).toUpperCase().paddedLeft ('0', 2); }
 
-juce::String fxToString (uint8_t fx, uint8_t param) { return hex2 (fx) + hex2 (param); }
+juce::String fxToString (uint8_t fx, uint8_t param)
+{
+    // Four Tracker's filter commands are shown with their letters: 0Xvv cutoff, 0Zvv resonance
+    if (fx == fxFilterCutoff)    return "0X" + hex2 (param);
+    if (fx == fxFilterResonance) return "0Z" + hex2 (param);
+    if (fx == fxDistortion)      return "0Y" + hex2 (param);
+    if (fx == fxAccent)          return "0V" + hex2 (param);
+    return hex2 (fx) + hex2 (param);
+}
+
+int filterCommandValue (uint8_t param)
+{
+    // typed as a decimal number 00-64 (so 0X64 = fully open); hex digits A-F still work as hex
+    const int hi = param >> 4, lo = param & 15;
+    const int v = (hi <= 9 && lo <= 9) ? hi * 10 + lo : (int) param;
+    return juce::jlimit (0, 64, v);
+}
 
 juce::String panToString (int pan)
 {

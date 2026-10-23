@@ -1,6 +1,6 @@
 # Four Tracker
 
-**A free 4-channel sample tracker for Windows that you play live: switch patterns from a MIDI keyboard while it plays.**
+**A free sample tracker for Windows (1 to 16 tracks) that you play live: switch patterns from a MIDI keyboard while it plays.**
 
 **Website and download:** https://elcrispo76.github.io/Four-Tracker/
 **Releases (installer):** https://github.com/elcrispo76/Four-Tracker/releases
@@ -18,11 +18,20 @@
   pattern break and jump, Exx commands and more.
 - **Samples:** WAV, AIFF, FLAC, Ogg, MP3 and Amiga IFF 8SVX / raw 8-bit. A sample browser plays each file as
   you select it.
-- **Built-in synth:** sine, triangle, saw, square and noise, with ADSR and a resonant low-pass filter.
-- **Sample editor:** loops (forward, ping-pong, backward), fades, normalize, cut / copy / paste, stereo view.
+- **1 to 16 tracks:** add or remove one track at a time with - TRACKS +. The pattern shows 4 at a time; the
+  track bar under the pattern (◀ 1-4 5-8 9-12 13-16 ▶) or Tab moves between them.
+- **Built-in synth:** sine, triangle, saw, square and noise, with ADSR, a resonant low-pass filter, distortion
+  and accent. Pattern commands 0Xvv / 0Zvv / 0Yvv / 0Vvv change cutoff, resonance, distortion and accent live.
+- **MIDI instruments:** an instrument slot can send MIDI notes (channel 1-16, optional program change) to a
+  hardware or software synth.
+- **Sample editor:** loops (forward, ping-pong, backward), fades, normalize, cut / copy / paste, OctaMED-style
+  MIX of two samples, Ctrl+A / C / X / V, stereo view.
+- **SPACING (0-32):** how many rows the cursor moves after a note and with the up / down arrows.
+- **VST3 effects** in the standalone app: two per track, with bypass, and chaining (send a track on into another
+  track's effects, so one reverb or delay can be shared).
 - **Modules (.ftm)** hold patterns and samples in one file.
 - **Standalone app** (Windows Audio, DirectSound, ASIO when built with the ASIO SDK) and **VST3 plugin**,
-  64-bit and 32-bit. Two instances in a DAW give you 8 channels.
+  64-bit and 32-bit.
 
 ## Repository layout
 
@@ -39,6 +48,8 @@
 
 Windows, Visual Studio 2022 or newer with "Desktop development with C++" and the Windows 11 SDK.
 Run `source\build-windows.bat`: it fetches JUCE 8 and builds 64-bit and 32-bit versions into `source\dist`.
+`source\build-windows-fx-share.bat` builds the version with VST3 effect hosting into `source\dist-fx-share`
+(this is the one in the releases). It never uses the VST2 SDK.
 Optional SDKs go in `source\SDKs` (they are never committed, see `.gitignore`). Details are in
 `source/BUILDING-AND-USAGE.md`.
 

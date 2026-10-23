@@ -7,15 +7,26 @@
 ; ===========================================================================
 
 #define AppName      "Four Tracker"
-#define AppVersion   "0.2.0"
+#define AppVersion   "0.3.0"
 #define AppPublisher "Four Tracker"
 #define AppExe       "Four Tracker.exe"
 #define Root         AddBackslash(SourcePath) + "..\"
-#define Dist64       Root + "dist\64-bit\"
-#define Dist32       Root + "dist\32-bit\"
+; FX = the personal version with VST effect hosting (built by build-windows-fx.bat)
+; FXSHARE = the FX version to share, VST3 effects only (built by build-windows-fx-share.bat)
+#ifdef FXSHARE
+  #define DistDir    "dist-fx-share"
+#else
+  #ifdef FX
+    #define DistDir  "dist-fx"
+  #else
+    #define DistDir  "dist"
+  #endif
+#endif
+#define Dist64       Root + DistDir + "\64-bit\"
+#define Dist32       Root + DistDir + "\32-bit\"
 
 #if !FileExists(Dist64 + AppExe)
-  #error "dist\64-bit\Four Tracker.exe was not found. Run build-windows.bat first."
+  #error "Four Tracker.exe was not found in dist (or dist-fx for the FX version). Run build-windows.bat or build-windows-fx.bat first."
 #endif
 
 #define HasVst3_64  DirExists(Dist64 + "Four Tracker.vst3")
@@ -25,11 +36,19 @@
 #ifdef SHARE
   #define HasVst2_64  0
   #define HasVst2_32  0
-  #define Edition     "-share"
+  #ifdef FXSHARE
+    #define Edition   "-share-fx"
+  #else
+    #define Edition   "-share"
+  #endif
 #else
   #define HasVst2_64  FileExists(Dist64 + "Four Tracker.dll")
   #define HasVst2_32  FileExists(Dist32 + "Four Tracker.dll")
-  #define Edition     "-personal"
+  #ifdef FX
+    #define Edition   "-personal-fx"
+  #else
+    #define Edition   "-personal"
+  #endif
 #endif
 #define HasManual   FileExists(AddBackslash(SourcePath) + "Four Tracker User Manual.pdf")
 
@@ -43,7 +62,7 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExe}
-OutputDir={#Root}dist
+OutputDir={#Root}{#DistDir}
 OutputBaseFilename=FourTracker-Setup-{#AppVersion}{#Edition}
 SetupIconFile={#Root}Resources\FourTracker.ico
 Compression=lzma2

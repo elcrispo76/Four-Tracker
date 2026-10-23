@@ -47,6 +47,13 @@ struct InstrumentParams
     int  release   = 200;        // ms
     int  cutoff    = 127;        // low-pass filter 0..127 (127 = open)
     int  resonance = 0;          // 0..127
+    int  distortion = 0;         // 0..64, drive into a soft clipper (0 = clean)
+    int  accent    = 0;          // 0..64, each note starts louder and brighter, then settles
+
+    // MIDI instrument (midi == true): notes are sent to MIDI out instead of played
+    bool midi        = false;
+    int  midiChannel = 1;        // 1..16
+    int  midiProgram = 0;        // 0 = don't send, 1..128 = program change before the first note
 };
 
 enum SynthWave { waveSine, waveTriangle, waveSaw, waveSquare, waveNoise, numSynthWaves };
@@ -97,6 +104,10 @@ struct Instrument
     bool fadeOut   (int from, int to);
     bool normalise (int from, int to);
     bool reverseRange (int from, int to);
+    /** Mixes another instrument's sample into this one, starting at frame `at` (like OctaMED's
+        MIX). The other sample is resampled to this sample's rate and may make it longer; mono
+        becomes stereo if either is stereo. Scaled down only if the sum would clip. */
+    bool mixIn (const Instrument& other, int at);
 
     juce::String loadFromFile (const juce::File& file, juce::AudioFormatManager& formats); // returns error or empty
 
@@ -104,6 +115,10 @@ struct Instrument
         volume, tuning and envelope if it already was a synth. */
     void makeSynth (int wave);
     bool isSynth() const noexcept { return ! isEmpty() && params.synth; }
+
+    /** Turns this slot into a MIDI instrument: its notes go to MIDI out (a device, or the DAW). */
+    void makeMidi();
+    bool isMidi() const noexcept { return ! isEmpty() && params.midi; }
 };
 
 } // namespace ft

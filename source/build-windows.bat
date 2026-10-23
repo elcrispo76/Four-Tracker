@@ -10,10 +10,31 @@ rem    SDKs\asiosdk\common\iasiodrv.h                 -> ASIO in the standalone 
 rem    SDKs\vst2sdk\pluginterfaces\vst2.x\aeffect.h    -> VST2 plugin (.dll)
 rem
 rem  Output goes to dist\64-bit and dist\32-bit
+rem
+rem  "build-windows.bat fx" (or build-windows-fx.bat) makes the personal FX
+rem  version that can load VST3 + VST2 effects, into dist-fx\64-bit and dist-fx\32-bit
+rem  "build-windows.bat fxshare" (or build-windows-fx-share.bat) makes the FX
+rem  version to share: VST3 effects only, no VST2 at all, into dist-fx-share
 rem ===========================================================================
 setlocal EnableExtensions
 cd /d "%~dp0"
 title Four Tracker - build
+
+set "EXTRA="
+set "SUFFIX="
+set "DISTDIR=dist"
+if /i "%~1"=="fx" (
+    set "EXTRA=-DFOURTRACKER_FX_HOST=ON -DFOURTRACKER_NO_VST2=OFF"
+    set "SUFFIX=-fx"
+    set "DISTDIR=dist-fx"
+    echo  *** FX-VERSION: kan hente VST3- og VST2-effekter - kun til dig selv ***
+)
+if /i "%~1"=="fxshare" (
+    set "EXTRA=-DFOURTRACKER_FX_HOST=ON -DFOURTRACKER_NO_VST2=ON"
+    set "SUFFIX=-fxshare"
+    set "DISTDIR=dist-fx-share"
+    echo  *** FX-DELE-VERSION: kan hente VST3-effekter, ingen VST2 - maa gerne deles ***
+)
 
 echo.
 echo  FOUR TRACKER - BUILD
@@ -118,7 +139,6 @@ echo.
 rem ---- optional SDKs ----------------------------------------------------------
 rem  CMake searches the SDKs folder by itself (any sub-folder layout works) and
 rem  prints ">>> VST2 SDK FUNDET" or ">>> VST2 SDK IKKE FUNDET" below.
-set "EXTRA="
 if not exist "SDKs" echo  Ingen SDKs-mappe - bygger Standalone + VST3 (uden VST2 og ASIO)
 echo.
 
@@ -131,24 +151,26 @@ if errorlevel 1 goto :fail32
 echo.
 echo  ===================================================================
 echo   FAERDIG!  Appen ligger her:
-echo     %CD%\dist\64-bit\Four Tracker.exe
+echo     %CD%\%DISTDIR%\64-bit\Four Tracker.exe
 echo  ===================================================================
 echo.
-echo  Bygget i dist\64-bit:
-dir /b "dist\64-bit"
+echo  Bygget i %DISTDIR%\64-bit:
+dir /b "%DISTDIR%\64-bit"
 echo.
-echo  Bygget i dist\32-bit:
-dir /b "dist\32-bit"
-if not exist "dist\64-bit\Four Tracker.dll" echo.
-if not exist "dist\64-bit\Four Tracker.dll" echo  OBS: ingen VST2 (Four Tracker.dll) - se ">>> VST2 SDK" linjen laengere oppe.
-start "" explorer "%CD%\dist\64-bit"
+echo  Bygget i %DISTDIR%\32-bit:
+dir /b "%DISTDIR%\32-bit"
+if not "%SUFFIX%"=="-fxshare" if not exist "%DISTDIR%\64-bit\Four Tracker.dll" echo.
+if not "%SUFFIX%"=="-fxshare" if not exist "%DISTDIR%\64-bit\Four Tracker.dll" echo  OBS: ingen VST2 (Four Tracker.dll) - se ">>> VST2 SDK" linjen laengere oppe.
+if "%SUFFIX%"=="-fxshare" echo.
+if "%SUFFIX%"=="-fxshare" echo  DELE-VERSION: kun VST3, ingen VST2. Lav installeren med build-installer.bat, valg 4.
+start "" explorer "%CD%\%DISTDIR%\64-bit"
 goto :end
 
 :fail32
 echo.
-echo  64-bit versionen blev bygget og ligger i dist\64-bit,
+echo  64-bit versionen blev bygget og ligger i %DISTDIR%\64-bit,
 echo  men 32-bit versionen fejlede (se beskeden ovenfor).
-start "" explorer "%CD%\dist\64-bit"
+start "" explorer "%CD%\%DISTDIR%\64-bit"
 goto :end
 
 :fail
@@ -168,19 +190,20 @@ rem ---------------------------------------------------------------------------
 :build
 echo.
 echo  ===== Bygger %2 (%1) =====
-"%CMAKE%" -S . -B "build-%1" -A %1 %EXTRA%
+set "BDIR=build-%1%SUFFIX%"
+"%CMAKE%" -S . -B "%BDIR%" -A %1 %EXTRA%
 if errorlevel 1 (
     echo.
-    echo  CMake fejlede - rydder build-%1 og proever forfra ...
-    rmdir /s /q "build-%1"
-    "%CMAKE%" -S . -B "build-%1" -A %1 %EXTRA%
+    echo  CMake fejlede - rydder %BDIR% og proever forfra ...
+    rmdir /s /q "%BDIR%"
+    "%CMAKE%" -S . -B "%BDIR%" -A %1 %EXTRA%
 )
 if errorlevel 1 exit /b 1
-"%CMAKE%" --build "build-%1" --config Release --parallel
+"%CMAKE%" --build "%BDIR%" --config Release --parallel
 if errorlevel 1 exit /b 1
 
-set "ART=build-%1\FourTracker_artefacts\Release"
-set "OUT=dist\%2"
+set "ART=%BDIR%\FourTracker_artefacts\Release"
+set "OUT=%DISTDIR%\%2"
 if not exist "%OUT%" mkdir "%OUT%"
 copy /Y "%ART%\Standalone\Four Tracker.exe" "%OUT%\" >nul
 if exist "%ART%\VST3\Four Tracker.vst3" xcopy /E /I /Y /Q "%ART%\VST3\Four Tracker.vst3" "%OUT%\Four Tracker.vst3" >nul
