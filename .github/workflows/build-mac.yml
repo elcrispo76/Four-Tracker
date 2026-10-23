@@ -1,0 +1,32 @@
+# Builds the Mac version (Four Tracker.app + Audio Unit, as a .dmg) on GitHub's Mac machines.
+# Start it by hand under Actions > "Mac build" > Run workflow, or it runs by itself when a
+# release is published and adds the .dmg to that release.
+name: Mac build
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  mac:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Four Tracker for Mac
+        run: bash source/build-mac.sh
+
+      - name: Keep the .dmg (download it under the run's "Artifacts")
+        uses: actions/upload-artifact@v4
+        with:
+          name: FourTracker-mac
+          path: source/dist-mac/*.dmg
+
+      - name: Add the .dmg to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" source/dist-mac/*.dmg --clobber
