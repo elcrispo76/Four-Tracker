@@ -85,6 +85,10 @@ FxPage::FxPage (EditorState& s, FxHost& host) : st (s), fx (host)
         }
 
     for (auto* b : { &addFolder, &removeFolder, &scan, &closeBtn }) addAndMakeVisible (b);
+   #if JUCE_MAC
+    addFolder.setVisible (false);        // Audio Units have no folders
+    removeFolder.setVisible (false);
+   #endif
     addFolder.icon = Theme::iconFolder; addFolder.iconWidth = 44.0f;
 
     addFolder.onClick = [this]
@@ -192,7 +196,11 @@ bool FxPage::keyPressed (const KeyPress& k)
 void FxPage::paint (Graphics& g)
 {
     Theme::drawPanel (g, getLocalBounds().toFloat());
+   #if JUCE_MAC
+    Theme::text (g, "AU EFFECTS", { 22.0f, 14.0f, 600.0f, 34.0f }, 30.0f, Theme::ink, Justification::centredLeft, true);
+   #else
     Theme::text (g, "VST EFFECTS", { 22.0f, 14.0f, 600.0f, 34.0f }, 30.0f, Theme::ink, Justification::centredLeft, true);
+   #endif
     Theme::text (g, "TWO EFFECTS PER CHANNEL - LOADS " + fx.getFormatNames().toUpperCase() + " - "
                     + String ((int) sizeof (void*) * 8) + "-BIT", { 420.0f, 18.0f, 1060.0f, 28.0f }, 16.0f,
                  Theme::ink.withAlpha (0.7f), Justification::centredLeft);
@@ -204,6 +212,12 @@ void FxPage::paint (Graphics& g)
     {
         auto r = folderBox.toFloat().reduced (14.0f, 10.0f);
         const auto& p = fx.getSearchPath();
+       #if JUCE_MAC
+        // Audio Units are registered with macOS, so there are no folders to pick
+        Theme::text (g, "AUDIO UNIT EFFECTS ARE FOUND BY MACOS - JUST PRESS SCAN", r.removeFromTop (28.0f), 16.0f, Theme::screenText);
+        Theme::text (g, "(THEY LIVE IN /LIBRARY/AUDIO/PLUG-INS/COMPONENTS)", r.removeFromTop (28.0f), 16.0f, Theme::screenDim);
+        juce::ignoreUnused (p);
+       #else
         if (p.getNumPaths() == 0)
             Theme::text (g, "NO FOLDERS - PRESS ADD FOLDER", r.removeFromTop (28.0f), 16.0f, Theme::screenDim);
         for (int i = 0; i < p.getNumPaths() && r.getHeight() >= 26.0f; ++i)
@@ -213,6 +227,7 @@ void FxPage::paint (Graphics& g)
                          r.removeFromTop (28.0f), 16.0f, Theme::screenText);
             if (last) break;
         }
+       #endif
     }
 
     // status

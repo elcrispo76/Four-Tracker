@@ -1,6 +1,6 @@
 # Four Tracker
 
-**A free sample tracker for Windows (1 to 16 tracks) that you play live: switch patterns from a MIDI keyboard while it plays.**
+**A free sample tracker for Windows and Mac (1 to 16 tracks) that you play live: switch patterns from a MIDI keyboard while it plays.**
 
 **Website and download:** https://elcrispo76.github.io/Four-Tracker/
 **Releases (installer):** https://github.com/elcrispo76/Four-Tracker/releases
@@ -30,8 +30,8 @@
 - **VST3 effects** in the standalone app: two per track, with bypass, and chaining (send a track on into another
   track's effects, so one reverb or delay can be shared).
 - **Modules (.ftm)** hold patterns and samples in one file.
-- **Standalone app** (Windows Audio, DirectSound, ASIO when built with the ASIO SDK) and **VST3 plugin**,
-  64-bit and 32-bit.
+- **Windows:** standalone app (Windows Audio, DirectSound, ASIO) and **VST3 plugin**, 64-bit and 32-bit.
+- **Mac:** standalone app and **Audio Unit** instrument, Apple Silicon + Intel, with Audio Unit effects.
 
 ## Repository layout
 
@@ -50,6 +50,9 @@ Windows, Visual Studio 2022 or newer with "Desktop development with C++" and the
 Run `source\build-windows.bat`: it fetches JUCE 8 and builds 64-bit and 32-bit versions into `source\dist`.
 `source\build-windows-fx-share.bat` builds the version with VST3 effect hosting into `source\dist-fx-share`
 (this is the one in the releases). It never uses the VST2 SDK.
+
+Mac: Xcode command line tools and CMake, then `bash source/build-mac.sh`. Without a Mac, run the **Mac build**
+workflow under Actions: it makes the .dmg on GitHub's Macs (and adds it to a release when one is published).
 The ASIO SDK (GPLv3) is in `source\SDKs\asiosdk`. The VST2 SDK, if you have it, also goes in `source\SDKs` but is
 never committed (see `.gitignore`). Details are in
 `source/BUILDING-AND-USAGE.md`.

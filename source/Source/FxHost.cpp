@@ -71,7 +71,11 @@ struct FxHost::EditorWindow : public DocumentWindow
 
 File FxHost::settingsFolder()
 {
+   #if JUCE_MAC
+    return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Application Support/Four Tracker");
+   #else
     return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Four Tracker");
+   #endif
 }
 
 FxHost::FxHost()
@@ -295,7 +299,7 @@ String FxHost::getFormatNames() const
 {
     StringArray names;
     for (auto* f : formatManager.getFormats())
-        names.add (f->getName() == "VST" ? String ("VST2") : f->getName());
+        names.add (f->getName() == "VST" ? String ("VST2") : f->getName() == "AudioUnit" ? String ("AU") : f->getName());
     return names.joinIntoString (", ");
 }
 

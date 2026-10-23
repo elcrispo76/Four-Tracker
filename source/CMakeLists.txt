@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
+# macOS: one universal build for Apple Silicon and Intel Macs, macOS 11 or newer
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS")
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Mac CPUs")
+endif()
+
 project(FourTracker VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -30,7 +36,14 @@ option(FOURTRACKER_HEADLESS_CHECK "Disable ALSA/X11 extensions (compile check on
 
 add_subdirectory(${JUCE_DIR} JUCE)
 
-set(FT_FORMATS Standalone VST3)
+# Windows: Standalone + VST3 (+ VST2 below). Mac: Standalone + Audio Unit, no VST.
+if(APPLE)
+    set(FT_FORMATS Standalone AU)
+    set(FOURTRACKER_NO_VST2 ON)
+    message(STATUS "  >>> MAC: Standalone + Audio Unit (AU)")
+else()
+    set(FT_FORMATS Standalone VST3)
+endif()
 
 # ---- find the VST2 SDK -----------------------------------------------------
 # Use VST2_SDK_DIR if given, otherwise search everything under SDKs/ for
@@ -94,6 +107,8 @@ juce_add_plugin(FourTracker
     PRODUCT_NAME                "Four Tracker"
     PLUGIN_MANUFACTURER_CODE    Ftrk
     PLUGIN_CODE                 Ft4c
+    BUNDLE_ID                   com.fourtracker.fourtracker
+    AU_MAIN_TYPE                kAudioUnitType_MusicDevice
     FORMATS                     ${FT_FORMATS}
     IS_SYNTH                    TRUE
     NEEDS_MIDI_INPUT            TRUE
@@ -157,8 +172,15 @@ elseif(WIN32)
 endif()
 
 if(FOURTRACKER_FX_HOST)
+    if(APPLE)
+        # Mac: Audio Unit effects (the ones in /Library/Audio/Plug-Ins/Components), no VST
+        target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=0)
+        message(STATUS "  >>> FX-VERSION (MAC): kan hente Audio Unit-effekter")
+    else()
     target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
-    if(NOT FOURTRACKER_NO_VST2 AND VST2_SDK_DIR AND EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
+    endif()
+    if(APPLE)
+    elseif(NOT FOURTRACKER_NO_VST2 AND VST2_SDK_DIR AND EXISTS "${VST2_SDK_DIR}/pluginterfaces/vst2.x/aeffect.h")
         target_compile_definitions(FourTracker PUBLIC JUCE_PLUGINHOST_VST=1)
         target_include_directories(FourTracker PUBLIC "${VST2_SDK_DIR}")
         message(STATUS "  >>> FX-VERSION: kan hente VST3- og VST2-effekter")
@@ -198,7 +220,11 @@ if(FOURTRACKER_BUILD_TESTS)
     target_compile_definitions(FourTrackerTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_MODAL_LOOPS_PERMITTED=1)
     if(FOURTRACKER_FX_HOST)
-        target_compile_definitions(FourTrackerTests PRIVATE FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
+        if(APPLE)
+            target_compile_definitions(FourTrackerTests PRIVATE FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=0)
+        else()
+            target_compile_definitions(FourTrackerTests PRIVATE FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
+        endif()
     endif()
     if(FOURTRACKER_HEADLESS_CHECK)
         target_compile_definitions(FourTrackerTests PRIVATE
