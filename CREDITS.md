@@ -18,7 +18,7 @@ The pixel font, icons and graphics are original to Four Tracker.
 |---|---|---|
 | [JUCE](https://juce.com) 8 | Windows, audio and MIDI devices, plugin formats, file formats | JUCE licence (Starter) or AGPLv3 |
 | Steinberg VST3 SDK (bundled with JUCE) | VST3 plugin | MIT |
-| Steinberg ASIO SDK (optional, not in this repository) | ASIO driver support | Steinberg licence or GPLv3 |
+| Steinberg ASIO SDK (in `source/SDKs/asiosdk`) | ASIO driver support in the released builds | GPLv3 (Steinberg's open-source ASIO licence, October 2025) |
 | Steinberg VST2 SDK (optional, not in this repository) | VST2 plugin, personal builds only | Not redistributable |
 
 VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a trademark and software of

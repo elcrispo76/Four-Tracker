@@ -50,7 +50,8 @@ Windows, Visual Studio 2022 or newer with "Desktop development with C++" and the
 Run `source\build-windows.bat`: it fetches JUCE 8 and builds 64-bit and 32-bit versions into `source\dist`.
 `source\build-windows-fx-share.bat` builds the version with VST3 effect hosting into `source\dist-fx-share`
 (this is the one in the releases). It never uses the VST2 SDK.
-Optional SDKs go in `source\SDKs` (they are never committed, see `.gitignore`). Details are in
+The ASIO SDK (GPLv3) is in `source\SDKs\asiosdk`. The VST2 SDK, if you have it, also goes in `source\SDKs` but is
+never committed (see `.gitignore`). Details are in
 `source/BUILDING-AND-USAGE.md`.
 
 ## License
