@@ -7,7 +7,7 @@
 ; ===========================================================================
 
 #define AppName      "Four Tracker"
-#define AppVersion   "0.3.0"
+#define AppVersion   "0.4.0"
 #define AppPublisher "Four Tracker"
 #define AppExe       "Four Tracker.exe"
 #define Root         AddBackslash(SourcePath) + "..\"

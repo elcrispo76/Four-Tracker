@@ -34,6 +34,11 @@ private:
     int ch;
     WaveformView wave { false };
     ValueBox vol { 0, 64, 64, 24.0f }, pan { -64, 64, 0, 24.0f }, pitch { -24, 24, 0, 24.0f };
+    PixelButton muteBtn { "MUTE", PixelButton::Style::Record, 13.0f },   // lit red when the channel is muted
+                soloBtn { "SOLO", PixelButton::Style::Record, 13.0f };   // lit red when on solo
+    void toggleMute();
+    void toggleSolo();
+    bool soloed = false, silenced = false;
     int shownInst = -1;
     const void* shownData = nullptr;
     float level = 0.0f;
@@ -154,6 +159,12 @@ private:
                 cutoff { 0, 127, 127, 127 }, resonance { 0, 127, 0, 0 },
                 distortion { 0, 64, 0, 0 }, accent { 0, 64, 0, 0 };
     bool synthMode = false;
+    std::array<PixelSlider*, 8> synthSliders() { return { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent }; }
+    void showKnobMenu (int param);
+public:
+    /** Updates the "CC 74" badges on the synth sliders (after MIDI LEARN or a knob move). */
+    void updateKnobBadges();
+private:
     enum Source { srcIsSample, srcIsSynth, srcIsMidi };
     void setSource (int source);
     void pushSynth();

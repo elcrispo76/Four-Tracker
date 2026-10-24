@@ -6,6 +6,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "TrackerTypes.h"
+#include <array>
 
 namespace ft
 {
@@ -50,6 +51,10 @@ struct InstrumentParams
     int  distortion = 0;         // 0..64, drive into a soft clipper (0 = clean)
     int  accent    = 0;          // 0..64, each note starts louder and brighter, then settles
 
+    // MIDI LEARN for the synth's 8 sliders (SynthParam order): the MIDI CC number
+    // (0..119) of the knob that moves it, -1 = none. One knob moves one slider only.
+    std::array<int, 8> cc { -1, -1, -1, -1, -1, -1, -1, -1 };
+
     // MIDI instrument (midi == true): notes are sent to MIDI out instead of played
     bool midi        = false;
     int  midiChannel = 1;        // 1..16
@@ -58,6 +63,13 @@ struct InstrumentParams
 
 enum SynthWave { waveSine, waveTriangle, waveSaw, waveSquare, waveNoise, numSynthWaves };
 const char* synthWaveName (int wave);
+
+/** The synth's 8 sliders, in the order of InstrumentParams::cc. */
+enum SynthParam { spAttack, spDecay, spSustain, spRelease, spCutoff, spResonance, spDistortion, spAccent, numSynthParams };
+const char* synthParamName (int param);
+int& synthParamRef (InstrumentParams&, int param);
+/** A knob's 0..127 turned into the slider's value (times use the slider's curve). */
+int synthParamFromMidi (int param, int midiValue);
 
 /** Read-only view handed to the audio thread. */
 struct InstrumentSnapshot : public juce::ReferenceCountedObject

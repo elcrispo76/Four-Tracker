@@ -124,7 +124,14 @@ public:
 
     std::function<juce::String (int)> formatter;
     std::function<void (int)> onChange;
+    std::function<void()> onRightClick;   // e.g. the MIDI LEARN menu
     float skew = 1.0f;   // > 1 gives more room to small values (times in ms)
+    /** Small text in the slider, e.g. the MIDI knob ("CC 74"); learning = waiting for a knob (lit). */
+    void setBadge (const juce::String& text, bool learning)
+    {
+        if (text == badge && learning == learn) return;
+        badge = text; learn = learning; repaint();
+    }
 
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -138,6 +145,8 @@ private:
     float toPos (int v) const;
     int fromPos (float pos) const;
     int minV, maxV, value, defV;
+    juce::String badge;
+    bool learn = false;
 };
 
 class ValueBox : public juce::Component, private juce::TextEditor::Listener

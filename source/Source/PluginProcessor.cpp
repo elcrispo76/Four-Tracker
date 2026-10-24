@@ -36,11 +36,14 @@ FourTrackerProcessor::FourTrackerProcessor()
    #endif
 
     startTimer (1000);
+    knobPump.tick = [this] { applyMidiKnobs(); };
+    knobPump.startTimerHz (60);
 }
 
 FourTrackerProcessor::~FourTrackerProcessor()
 {
     stopTimer();
+    knobPump.stopTimer();
    #if FOURTRACKER_FX_HOST
     engine.channelInsert = nullptr;
     engine.channelRoute = nullptr;
@@ -116,6 +119,88 @@ void FourTrackerProcessor::instrumentChanged (int slot)
     in.sanitise();
     engine.publishInstrument (slot, in.makeSnapshot());
     sendChangeMessage();
+}
+
+// ---------------------------------------------------------------------------
+// synth MIDI LEARN
+// ---------------------------------------------------------------------------
+
+void FourTrackerProcessor::startSynthLearn (int slot, int param)
+{
+    if (slot <= 0 || slot >= kNumInstruments || ! juce::isPositiveAndBelow (param, (int) ft::numSynthParams)) return;
+    int cc = 0, v = 0;
+    while (engine.popController (cc, v)) {}      // only a knob moved from now on counts
+    learnSlot = slot;
+    learnParam = param;
+    ++knobRevision;
+}
+
+void FourTrackerProcessor::cancelSynthLearn()
+{
+    if (learnSlot < 0) return;
+    learnSlot = learnParam = -1;
+    ++knobRevision;
+}
+
+void FourTrackerProcessor::forgetSynthKnob (int slot, int param)
+{
+    if (slot <= 0 || slot >= kNumInstruments || ! juce::isPositiveAndBelow (param, (int) ft::numSynthParams)) return;
+    instruments[(size_t) slot].params.cc[(size_t) param] = -1;
+    instrumentChanged (slot);
+    ++knobRevision;
+}
+
+void FourTrackerProcessor::applyMidiKnobs()
+{
+    int cc = 0, value = 0;
+    std::array<int, 128> latest;              // only the last value of each knob counts
+    latest.fill (-1);
+    bool any = false;
+    while (engine.popController (cc, value))
+    {
+        if (learnSlot > 0)
+        {
+            // one knob moves one slider: take it away from wherever it was
+            for (auto& in : instruments)
+                for (auto& c : in.params.cc)
+                    if (c == cc) c = -1;
+            auto& in = instruments[(size_t) learnSlot];
+            in.params.cc[(size_t) learnParam] = cc;
+            knobMessage = "CC " + juce::String (cc) + " NOW MOVES " + ft::synthParamName (learnParam)
+                        + " OF SLOT " + juce::String::toHexString (learnSlot).paddedLeft ('0', 2).toUpperCase();
+            const int slot = learnSlot;
+            learnSlot = learnParam = -1;
+            instrumentChanged (slot);
+            ++knobRevision;
+            continue;   // the knob that was just learned doesn't jump the value yet
+        }
+        latest[(size_t) cc] = value;
+        any = true;
+    }
+    if (! any) return;
+
+    bool moved = false;
+    for (int slot = 1; slot < kNumInstruments; ++slot)
+    {
+        auto& in = instruments[(size_t) slot];
+        if (! in.isSynth()) continue;
+        bool changed = false;
+        for (int p = 0; p < ft::numSynthParams; ++p)
+        {
+            const int c = in.params.cc[(size_t) p];
+            if (c < 0 || latest[(size_t) c] < 0) continue;
+            int& ref = ft::synthParamRef (in.params, p);
+            const int v = ft::synthParamFromMidi (p, latest[(size_t) c]);
+            if (v != ref) { ref = v; changed = true; }
+        }
+        if (changed)
+        {
+            in.sanitise();
+            engine.publishInstrument (slot, in.makeSnapshot());   // heard at once; no full UI refresh
+            moved = true;
+        }
+    }
+    if (moved) ++knobRevision;
 }
 
 juce::String FourTrackerProcessor::loadInstrument (int slot, const juce::File& file)
@@ -284,6 +369,9 @@ juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
             it.setProperty ("resonance", p.resonance, nullptr);
             it.setProperty ("distortion", p.distortion, nullptr);
             it.setProperty ("accent", p.accent, nullptr);
+            juce::StringArray ccs;
+            for (auto c : p.cc) ccs.add (juce::String (c));
+            it.setProperty ("knobs", ccs.joinIntoString (","), nullptr);
         }
         it.setProperty ("rate", in.data->sampleRate, nullptr);
         it.setProperty ("bits", in.data->bitDepth, nullptr);
@@ -347,6 +435,11 @@ void FourTrackerProcessor::instrumentsFromTree (const juce::ValueTree& t)
         p.resonance = it.getProperty ("resonance", 0);
         p.distortion = it.getProperty ("distortion", 0);
         p.accent = it.getProperty ("accent", 0);
+        {
+            juce::StringArray ccs;
+            ccs.addTokens (it.getProperty ("knobs", "").toString(), ",", "");
+            for (int k = 0; k < (int) p.cc.size(); ++k) p.cc[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
+        }
         p.midi = it.getProperty ("midi", false);
         p.midiChannel = it.getProperty ("midiCh", 1);
         p.midiProgram = it.getProperty ("midiProg", 0);
@@ -380,6 +473,7 @@ void FourTrackerProcessor::writeSong (juce::ValueTree& t) const
         ch.setProperty ("pan", engine.mix[c].pan.load(), nullptr);
         ch.setProperty ("pitch", engine.mix[c].pitch.load(), nullptr);
         ch.setProperty ("mute", engine.mix[c].mute.load(), nullptr);
+        ch.setProperty ("solo", engine.mix[c].solo.load(), nullptr);
         mixer.appendChild (ch, nullptr);
     }
     t.appendChild (mixer, nullptr);
@@ -405,6 +499,7 @@ void FourTrackerProcessor::readSong (const juce::ValueTree& t)
         engine.mix[c].pan = juce::jlimit (-64, 64, (int) ch.getProperty ("pan", 0));
         engine.mix[c].pitch = juce::jlimit (-24, 24, (int) ch.getProperty ("pitch", 0));
         engine.mix[c].mute = (bool) ch.getProperty ("mute", false);
+        engine.mix[c].solo = (bool) ch.getProperty ("solo", false);
         engine.lastInstrumentOnChannel[c] = 0;
     }
 
@@ -480,6 +575,7 @@ void FourTrackerProcessor::setNumChannels (int n)
             for (int r = 0; r < kMaxRows; ++r)
                 for (int c = n; c < kNumChannels; ++c)
                     engine.getPattern (p).at (r, c).clear();
+        for (int c = n; c < kNumChannels; ++c) { engine.mix[c].solo = false; engine.mix[c].mute = false; }
         engine.numChannels = n;
     }
    #if FOURTRACKER_FX_HOST
@@ -521,6 +617,7 @@ void FourTrackerProcessor::newPatternSet()
         engine.mix[c].pan = 0;
         engine.mix[c].pitch = 0;
         engine.mix[c].mute = false;
+        engine.mix[c].solo = false;
         engine.lastInstrumentOnChannel[c] = 0;
     }
     engine.requestPattern (0);

@@ -104,6 +104,16 @@ ChannelStrip::ChannelStrip (EditorState& s, int channel) : st (s), ch (channel)
     addAndMakeVisible (vol);
     addAndMakeVisible (pan);
     addAndMakeVisible (pitch);
+    for (auto* b : { &muteBtn, &soloBtn })
+    {
+        addAndMakeVisible (b);
+        b->setWantsKeyboardFocus (false);
+        b->setMouseClickGrabsKeyboardFocus (false);      // Enter keeps starting the pattern
+    }
+    muteBtn.setTooltip ("Mute this channel");
+    soloBtn.setTooltip ("Solo: hear only the channels on SOLO");
+    muteBtn.onClick = [this] { toggleMute(); };
+    soloBtn.onClick = [this] { toggleSolo(); };
     wave.showMarkers = false;
     wave.lineThickness = 1.2f;
     wave.onClicked = [this]
@@ -171,10 +181,15 @@ void ChannelStrip::refresh()
     const float lvl = (float) e.channelLevel[ch].exchange (0) / 1000.0f;
     const float newLevel = jmax (lvl, level * 0.82f);
     const bool m = e.mix[ch].mute.load();
-    if (std::abs (newLevel - level) > 0.004f || m != muted)
+    const bool so = e.mix[ch].solo.load(), sil = e.isChannelSilenced (ch);
+    muteBtn.setToggleState (m, dontSendNotification);
+    soloBtn.setToggleState (so, dontSendNotification);
+    if (std::abs (newLevel - level) > 0.004f || m != muted || so != soloed || sil != silenced)
     {
         level = newLevel;
         muted = m;
+        soloed = so;
+        silenced = sil;
         repaint (wave.getBounds().withY (wave.getBottom()).withHeight (8));
         repaint (0, 0, 120, 50);
     }
@@ -183,8 +198,7 @@ void ChannelStrip::refresh()
 void ChannelStrip::paint (Graphics& g)
 {
     Theme::drawPanel (g, getLocalBounds().toFloat());
-    Theme::text (g, "CH" + String (ch + 1), { 18.0f, 14.0f, 120.0f, 30.0f }, 30.0f, muted ? Theme::panelEdgeLo : Theme::ink, Justification::centredLeft, true);
-    if (muted) Theme::text (g, "MUTE", { 100.0f, 22.0f, 80.0f, 16.0f }, 15.0f, Theme::ink, Justification::centredLeft);
+    Theme::text (g, "CH" + String (ch + 1), { 18.0f, 14.0f, 120.0f, 30.0f }, ch >= 9 ? 24.0f : 30.0f, silenced ? Theme::panelEdgeLo : Theme::ink, Justification::centredLeft, true);
 
     labelLeft (g, "VOL",   { 222, 16, 56, 40 }, 17.0f);
     labelLeft (g, "PAN",   { 222, 64, 56, 40 }, 17.0f);
@@ -206,18 +220,34 @@ void ChannelStrip::resized()
     vol.setBounds (280, 12, 74, 46);
     pan.setBounds (280, 60, 74, 46);
     pitch.setBounds (280, 108, 74, 46);
+    muteBtn.setBounds (100, 12, 50, 34);
+    soloBtn.setBounds (154, 12, 50, 34);
 }
 
 void ChannelStrip::mouseDown (const MouseEvent& e)
 {
-    if (e.y < 50 && e.x < 180)
-    {
-        auto& m = st.engine().mix[ch].mute;
-        m = ! m.load();
-        st.setStatus (String ("CH") + String (ch + 1) + (m.load() ? " MUTED" : " UNMUTED"));
-        refresh();
-        repaint();
-    }
+    if (e.y < 50 && e.x < 98) toggleMute();   // clicking the channel name still works
+}
+
+void ChannelStrip::toggleSolo()
+{
+    auto& so = st.engine().mix[ch].solo;
+    so = ! so.load();
+    int n = 0;
+    for (int c = 0; c < st.numChannels(); ++c) n += st.engine().mix[c].solo.load() ? 1 : 0;
+    st.setStatus (String ("CH") + String (ch + 1) + (so.load() ? " SOLO" : " SOLO OFF")
+                  + (n > 0 ? " - HEARING " + String (n) + " SOLO CHANNEL" + (n > 1 ? "S" : "") : String()));
+    refresh();
+    repaint();
+}
+
+void ChannelStrip::toggleMute()
+{
+    auto& m = st.engine().mix[ch].mute;
+    m = ! m.load();
+    st.setStatus (String ("CH") + String (ch + 1) + (m.load() ? " MUTED" : " UNMUTED"));
+    refresh();
+    repaint();
 }
 
 ChannelStripsPanel::ChannelStripsPanel (EditorState& s) : st (s)
@@ -611,6 +641,9 @@ InstrumentsPage::InstrumentsPage (EditorState& s) : st (s), list (s)
         sl->onChange = [this] (int) { pushSynth(); };
         addChildComponent (sl);
     }
+    // right-click a slider: MIDI LEARN a knob for it (each synth slot has its own knobs)
+    for (int p = 0; p < numSynthParams; ++p)
+        synthSliders()[(size_t) p]->onRightClick = [this, p] { showKnobMenu (p); };
 
     wave.onClicked = [this] { previewOnce (st, slot(), this); };
     list.onSelectionChanged = [this] { instrumentsChanged(); };
@@ -670,6 +703,53 @@ void InstrumentsPage::pushSynth()
     st.proc.instrumentChanged (slot());
 }
 
+void InstrumentsPage::showKnobMenu (int param)
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (! in.isSynth()) return;
+    const int cc = in.params.cc[(size_t) param];
+    const bool learning = st.proc.isSynthLearning (slot(), param);
+    PopupMenu m;
+    m.addSectionHeader (String (synthParamName (param)) + " - SLOT " + hex2 (slot()));
+    m.addItem (1, learning ? "WAITING FOR A KNOB ... (CLICK TO CANCEL)" : "MIDI LEARN: MOVE A KNOB ON YOUR MIDI KEYBOARD");
+    if (cc >= 0) m.addItem (2, "FORGET KNOB CC " + String (cc));
+    Component::SafePointer<InstrumentsPage> safe (this);
+    const int s = slot();
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (synthSliders()[(size_t) param]), [safe, param, s, learning] (int chosen)
+    {
+        if (safe == nullptr || chosen <= 0) return;
+        auto& self = *safe;
+        if (chosen == 1 && learning)
+        {
+            self.st.proc.cancelSynthLearn();
+            self.st.setStatus ("MIDI LEARN CANCELLED");
+        }
+        else if (chosen == 1)
+        {
+            self.st.proc.startSynthLearn (s, param);
+            self.st.setStatus ("MIDI LEARN: MOVE A KNOB FOR " + String (synthParamName (param)) + " OF SLOT " + hex2 (s));
+        }
+        else if (chosen == 2)
+        {
+            self.st.proc.forgetSynthKnob (s, param);
+            self.st.setStatus (String (synthParamName (param)) + " OF SLOT " + hex2 (s) + " HAS NO KNOB NOW");
+        }
+        self.updateKnobBadges();
+        self.st.changed();
+    });
+}
+
+void InstrumentsPage::updateKnobBadges()
+{
+    auto& in = st.proc.getInstrument (slot());
+    for (int p = 0; p < numSynthParams; ++p)
+    {
+        const bool learning = in.isSynth() && st.proc.isSynthLearning (slot(), p);
+        const int cc = in.params.cc[(size_t) p];
+        synthSliders()[(size_t) p]->setBadge (learning ? String ("LEARN") : cc >= 0 ? "CC " + String (cc) : String(), learning);
+    }
+}
+
 void InstrumentsPage::updateSynthVisibility()
 {
     for (auto& b : waveButtons) b->setVisible (synthMode);
@@ -705,6 +785,7 @@ void InstrumentsPage::instrumentsChanged()
     resonance.setValue (in.params.resonance);
     distortion.setValue (in.params.distortion);
     accent.setValue (in.params.accent);
+    updateKnobBadges();
     numberLabel.setText (formatNumber (slot(), 2, st.hex()));
     name.setText (in.name);
     volume.setValue (in.params.volume);
@@ -792,6 +873,9 @@ void InstrumentsPage::paint (Graphics& g)
         lab ("ATTACK", attack); lab ("DECAY", decay); lab ("SUSTAIN", sustain); lab ("RELEASE", release);
         lab ("CUTOFF", cutoff); lab ("RESONANCE", resonance);
         lab ("DISTORTION", distortion); lab ("ACCENT", accent);
+        Theme::text (g, "RIGHT-CLICK A SLIDER: MIDI LEARN A KNOB",
+                     slotPanel.toFloat().withTrimmedLeft (160.0f).withTrimmedRight (16.0f).translated (0.0f, 16.0f).withHeight (22.0f),
+                     15.0f, Theme::ink.withAlpha (0.6f), Justification::topRight);
         return;
     }
 

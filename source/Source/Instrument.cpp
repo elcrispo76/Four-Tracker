@@ -24,6 +24,7 @@ void Instrument::sanitise()
     p.resonance = juce::jlimit (0, 127, p.resonance);
     p.distortion = juce::jlimit (0, 64, p.distortion);
     p.accent    = juce::jlimit (0, 64, p.accent);
+    for (auto& c : p.cc) if (c < 0 || c > 119) c = -1;
     p.midiChannel = juce::jlimit (1, 16, p.midiChannel);
     p.midiProgram = juce::jlimit (0, 128, p.midiProgram);
 
@@ -49,6 +50,41 @@ const char* synthWaveName (int wave)
 {
     static const char* names[] = { "SINE", "TRIANGLE", "SAW", "SQUARE", "NOISE" };
     return names[juce::jlimit (0, (int) numSynthWaves - 1, wave)];
+}
+
+const char* synthParamName (int param)
+{
+    static const char* names[] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "CUTOFF", "RESONANCE", "DISTORTION", "ACCENT" };
+    return juce::isPositiveAndBelow (param, (int) numSynthParams) ? names[param] : "";
+}
+
+int& synthParamRef (InstrumentParams& p, int param)
+{
+    switch (param)
+    {
+        case spAttack:     return p.attack;
+        case spDecay:      return p.decay;
+        case spSustain:    return p.sustain;
+        case spRelease:    return p.release;
+        case spCutoff:     return p.cutoff;
+        case spResonance:  return p.resonance;
+        case spDistortion: return p.distortion;
+        default:           return p.accent;
+    }
+}
+
+int synthParamFromMidi (int param, int midiValue)
+{
+    const double x = juce::jlimit (0, 127, midiValue) / 127.0;
+    switch (param)
+    {
+        case spAttack: case spDecay: case spRelease:
+            return juce::roundToInt (5000.0 * x * x * x);          // same curve as the sliders (skew 3)
+        case spCutoff: case spResonance:
+            return juce::jlimit (0, 127, midiValue);
+        default:
+            return juce::roundToInt (64.0 * x);                     // sustain, distortion, accent
+    }
 }
 
 void Instrument::makeSynth (int wave)

@@ -1448,6 +1448,190 @@ int main (int argc, char** argv)
         }
     }
 
+    // synth MIDI LEARN: knobs on the MIDI keyboard move the synth sliders, per instrument
+    {
+        auto pm = std::make_unique<FourTrackerProcessor>();
+        pm->prepareToPlay (44100.0, Runner::block);
+        Runner rm { *pm };
+        auto knob = [&] (int cc, int value, int ch = 1)
+        {
+            rm.run (1, [&] (int, MidiBuffer& mb) { mb.addEvent (MidiMessage::controllerEvent (ch, cc, value), 0); });
+            pm->applyMidiKnobs();
+        };
+        auto& s9 = pm->getInstrument (9).params;
+        auto& s10 = pm->getInstrument (10).params;
+        pm->getInstrument (9).makeSynth (ft::waveSaw);   pm->instrumentChanged (9);
+        pm->getInstrument (10).makeSynth (ft::waveSquare); pm->instrumentChanged (10);
+
+        pm->startSynthLearn (9, ft::spCutoff);
+        CHECK (pm->isSynthLearning (9, ft::spCutoff), "MIDI LEARN: waiting for a knob for slot 09 CUTOFF");
+        knob (74, 10);
+        CHECK (s9.cc[ft::spCutoff] == 74 && ! pm->isSynthLearning (9, ft::spCutoff), "MIDI LEARN: CC 74 learned for slot 09 CUTOFF");
+        CHECK (s9.cutoff == 127, "MIDI LEARN: the learning move itself doesn't jump the value");
+        knob (74, 0);
+        CHECK (s9.cutoff == 0 && s10.cutoff == 127, "CC 74 moves slot 09's cutoff, not slot 10's");
+        const int rev = pm->knobRevision.load();
+        knob (74, 100);
+        CHECK (s9.cutoff == 100 && pm->knobRevision.load() != rev, "the knob moves the cutoff again (and the UI is told)");
+
+        pm->startSynthLearn (10, ft::spCutoff);
+        knob (74, 5);
+        CHECK (s10.cc[ft::spCutoff] == 74 && s9.cc[ft::spCutoff] == -1, "learning CC 74 for slot 10 takes it away from slot 09 (one knob, one slider)");
+        knob (74, 64);
+        CHECK (s10.cutoff == 64 && s9.cutoff == 100, "now CC 74 moves only slot 10");
+
+        pm->startSynthLearn (9, ft::spResonance); knob (71, 0);
+        pm->startSynthLearn (9, ft::spAttack);    knob (20, 0);
+        pm->startSynthLearn (9, ft::spSustain);   knob (21, 0);
+        knob (71, 127); knob (20, 127); knob (21, 127);
+        CHECK (s9.resonance == 127 && s9.attack == 5000 && s9.sustain == 64, "knobs reach the top of resonance (127), attack (5 s) and sustain (64)");
+        knob (20, 64);
+        CHECK (s9.attack > 500 && s9.attack < 800, "attack follows the slider's curve (CC 64 -> " + String (s9.attack) + " ms)");
+
+        pm->getEngine().midiChannel = 2;
+        knob (71, 0, 1);
+        CHECK (s9.resonance == 127, "a knob on another MIDI channel is ignored when MIDI CHANNEL is set");
+        knob (71, 0, 2);
+        CHECK (s9.resonance == 0, "...and works on the chosen channel");
+        pm->getEngine().midiChannel = 0;
+
+        pm->forgetSynthKnob (9, ft::spResonance);
+        knob (71, 90);
+        CHECK (s9.cc[ft::spResonance] == -1 && s9.resonance == 0, "FORGET KNOB: the knob no longer moves it");
+
+        pm->startSynthLearn (9, ft::spDistortion);
+        pm->cancelSynthLearn();
+        knob (30, 50);
+        CHECK (s9.cc[ft::spDistortion] == -1, "a cancelled MIDI LEARN learns nothing");
+
+        auto f = outDir.getChildFile ("knobs.ftm");
+        pm->saveModule (f);
+        auto pm2 = std::make_unique<FourTrackerProcessor>();
+        CHECK (pm2->loadModule (f).isEmpty() && pm2->getInstrument (9).params.cc[ft::spAttack] == 20
+               && pm2->getInstrument (10).params.cc[ft::spCutoff] == 74 && pm2->getInstrument (9).params.cc[ft::spCutoff] == -1,
+               "the learned knobs are saved in the module");
+
+        // the Instruments page shows the knobs on the sliders
+        pm->selectedInstrument = 9;
+        std::unique_ptr<AudioProcessorEditor> edm (pm->createEditor());
+        edm->setSize (1536, 1024);
+        std::function<Component* (Component&, std::function<bool (Component&)>)> findM =
+            [&] (Component& c, std::function<bool (Component&)> pred) -> Component*
+        {
+            for (auto* ch : c.getChildren()) { if (pred (*ch)) return ch; if (auto* fnd = findM (*ch, pred)) return fnd; }
+            return nullptr;
+        };
+        if (auto* tab = dynamic_cast<Button*> (findM (*edm, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "INSTRUMENTS"; })))
+            tab->triggerClick();
+        pm->startSynthLearn (9, ft::spAccent);
+        MessageManager::getInstance()->runDispatchLoopUntil (120);
+        int sliders = 0, rightClick = 0;
+        std::function<void (Component&)> count = [&] (Component& c)
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* sl = dynamic_cast<PixelSlider*> (ch)) { if (sl->isVisible()) { ++sliders; if (sl->onRightClick) ++rightClick; } }
+                count (*ch);
+            }
+        };
+        count (*edm);
+        CHECK (sliders == 8 && rightClick == 8, "all 8 synth sliders have MIDI LEARN on right-click");
+        if (screens)
+        {
+            auto img = edm->createComponentSnapshot (edm->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("18_synth_knobs.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        pm->cancelSynthLearn();
+        edm.reset();
+    }
+
+    // MUTE and SOLO on the channel strips
+    {
+        auto pso = std::make_unique<FourTrackerProcessor>();
+        pso->prepareToPlay (44100.0, Runner::block);
+        auto& es = pso->getEngine();
+        std::array<double, ft::kNumChannels> energy {};
+        es.channelInsert = [&] (int ch, float* l, float* r, int n)
+        { for (int i = 0; i < n; ++i) energy[(size_t) ch] += (double) l[i] * l[i] + (double) r[i] * r[i]; };
+        auto play = [&]
+        {
+            energy.fill (0.0);
+            es.requestPattern (0);
+            if (! es.playing.load()) es.requestStartStop();
+            Runner rr { *pso };
+            rr.run (300);
+            es.requestStop(); rr.run (2);
+        };
+        play();
+        CHECK (energy[0] > 0 && energy[1] > 0 && energy[2] > 0, "solo test: channels 1-3 play");
+        es.mix[1].solo = true;
+        play();
+        CHECK (energy[1] > 0 && energy[0] == 0 && energy[2] == 0 && energy[3] == 0, "SOLO on CH2: only CH2 is heard");
+        es.mix[2].solo = true;
+        play();
+        CHECK (energy[1] > 0 && energy[2] > 0 && energy[0] == 0, "SOLO on CH2 and CH3: both are heard, CH1 isn't");
+        es.mix[2].mute = true;
+        play();
+        CHECK (energy[2] == 0 && energy[1] > 0, "MUTE wins over SOLO on the same channel");
+        es.mix[1].solo = false; es.mix[2].solo = false; es.mix[2].mute = false;
+        play();
+        CHECK (energy[0] > 0 && energy[2] > 0, "SOLO off: everything is heard again");
+        es.mix[1].solo = true;
+        auto f = outDir.getChildFile ("solo.ftm");
+        pso->saveModule (f);
+        auto pso2 = std::make_unique<FourTrackerProcessor>();
+        CHECK (pso2->loadModule (f).isEmpty() && pso2->getEngine().mix[1].solo.load(), "SOLO is saved in the module");
+        pso->setNumChannels (8);
+        es.mix[6].solo = true;
+        pso->setNumChannels (4);
+        CHECK (! es.mix[6].solo.load(), "removing a track takes its SOLO with it");
+        es.mix[1].solo = false;
+        es.channelInsert = nullptr;
+
+        // the buttons on the strip
+        std::unique_ptr<AudioProcessorEditor> eds (pso->createEditor());
+        eds->setSize (1536, 1024);
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        std::function<PixelButton* (Component&, const String&)> findB = [&] (Component& c, const String& t) -> PixelButton*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<PixelButton*> (ch)) if (b->getButtonText() == t && dynamic_cast<ChannelStrip*> (b->getParentComponent()) != nullptr) return b;
+                if (auto* fnd = findB (*ch, t)) return fnd;
+            }
+            return nullptr;
+        };
+        auto* soloB = findB (*eds, "SOLO");
+        auto* muteB = findB (*eds, "MUTE");
+        CHECK (soloB != nullptr && muteB != nullptr && ! soloB->getWantsKeyboardFocus(), "channel strips have MUTE and SOLO buttons");
+        if (soloB) soloB->onClick();
+        if (muteB) muteB->onClick();
+        CHECK (es.mix[0].solo.load() && es.mix[0].mute.load(), "the buttons switch SOLO and MUTE on CH1");
+        es.mix[0].mute = false;
+        pso->setNumChannels (16);
+        es.mix[0].solo = true;
+        es.mix[13].solo = true;
+        eds->keyPressed (KeyPress (KeyPress::homeKey));
+        MessageManager::getInstance()->runDispatchLoopUntil (120);
+        if (screens)
+        {
+            auto img = eds->createComponentSnapshot (eds->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("19_solo.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        for (int i = 0; i < 12; ++i) eds->keyPressed (KeyPress (KeyPress::tabKey));   // to tracks 13-16
+        MessageManager::getInstance()->runDispatchLoopUntil (120);
+        if (screens)
+        {
+            auto img = eds->createComponentSnapshot (eds->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("20_solo_13_16.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        es.mix[0].solo = false; es.mix[13].solo = false;
+        eds.reset();
+    }
+
     // FX chaining: a channel's sound can go on into another channel's effects
     {
         auto pr = std::make_unique<FourTrackerProcessor>();

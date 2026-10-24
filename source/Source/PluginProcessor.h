@@ -51,6 +51,20 @@ public:
         and notifies the UI. */
     void instrumentChanged (int slot);
 
+    // ---- synth MIDI LEARN: a knob on the MIDI keyboard moves one synth slider -------
+    /** The next knob moved becomes this slot's knob for that slider (ft::SynthParam). */
+    void startSynthLearn (int slot, int param);
+    void cancelSynthLearn();
+    bool isSynthLearning (int slot, int param) const { return learnSlot == slot && learnParam == param; }
+    void forgetSynthKnob (int slot, int param);
+    /** Takes the knobs moved since last time and moves the synth sliders they belong to.
+        Runs by itself ~60 times a second; public for the test program. */
+    void applyMidiKnobs();
+    /** Goes up each time a knob moved a slider or was learned (the UI follows it). */
+    std::atomic<int> knobRevision { 0 };
+    /** A message for the status line after a knob was learned ("CC 74 -> SLOT 09 CUTOFF"). */
+    juce::String takeKnobMessage() { auto m = knobMessage; knobMessage = {}; return m; }
+
     juce::String loadInstrument (int slot, const juce::File& file);
     void discardInstrument (int slot);
     juce::AudioFormatManager& getFormatManager() noexcept { return formats; }
@@ -111,6 +125,13 @@ private:
 
     ft::TrackerEngine engine;
     std::array<ft::Instrument, ft::kNumInstruments> instruments;
+    int learnSlot = -1, learnParam = -1;
+    juce::String knobMessage;
+    struct KnobPump : juce::Timer
+    {
+        std::function<void()> tick;
+        void timerCallback() override { if (tick) tick(); }
+    } knobPump;
     ft::Instrument audition;
    #if FOURTRACKER_FX_HOST
     std::unique_ptr<FxHost> fx;

@@ -286,6 +286,14 @@ void FourTrackerEditor::changeListenerCallback (ChangeBroadcaster*)
 
 void FourTrackerEditor::timerCallback()
 {
+    // MIDI knobs moved synth sliders, or a knob was learned
+    if (const int kr = proc.knobRevision.load(); kr != lastKnobRevision)
+    {
+        lastKnobRevision = kr;
+        if (instrumentsPage.isVisible()) instrumentsPage.instrumentsChanged();
+        const auto msg = proc.takeKnobMessage();
+        if (msg.isNotEmpty()) state.setStatus (msg);
+    }
     updateChannelView();
     header.refresh();
     title.refresh();

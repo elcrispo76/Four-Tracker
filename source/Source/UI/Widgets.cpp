@@ -590,6 +590,18 @@ void PixelSlider::paint (Graphics& g)
     const String txt = formatter ? formatter (value) : String (value);
     Theme::text (g, txt, r.withTrimmedLeft (r.getWidth() - 104.0f).withTrimmedRight (10.0f), r.getHeight() * 0.42f,
                  Theme::screenText, Justification::centredRight);
+
+    // MIDI knob badge on the track ("CC 74"), lit while waiting for a knob
+    if (badge.isNotEmpty())
+    {
+        const float bh = jmin (t.getHeight() + 6.0f, r.getHeight() - 8.0f);
+        auto b = Rectangle<float> (t.getRight() - 96.0f, t.getCentreY() - bh * 0.5f, 92.0f, bh);
+        g.setColour (learn ? Colour (0xffd9342b) : Theme::screen.withAlpha (0.85f));
+        g.fillRect (b);
+        g.setColour (learn ? Colours::white : Theme::screenDim);
+        g.drawRect (b, 1.0f);
+        Theme::text (g, badge, b.reduced (4.0f, 0.0f), bh * 0.62f, learn ? Colours::white : Theme::screenText, Justification::centred);
+    }
 }
 
 float PixelSlider::toPos (int v) const
@@ -612,8 +624,12 @@ void PixelSlider::setFromX (float x)
     setValue (fromPos ((x - t.getX()) / jmax (1.0f, t.getWidth())), true);
 }
 
-void PixelSlider::mouseDown (const MouseEvent& e)  { setFromX (e.position.x); }
-void PixelSlider::mouseDrag (const MouseEvent& e)  { setFromX (e.position.x); }
+void PixelSlider::mouseDown (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() && onRightClick) { onRightClick(); return; }
+    setFromX (e.position.x);
+}
+void PixelSlider::mouseDrag (const MouseEvent& e)  { if (! e.mods.isPopupMenu()) setFromX (e.position.x); }
 void PixelSlider::mouseDoubleClick (const MouseEvent&) { setValue (defV, true); }
 
 void PixelSlider::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)

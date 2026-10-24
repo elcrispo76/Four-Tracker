@@ -71,6 +71,7 @@ private:
     void addTrack();
     void removeTrack();
     int lastViewKey = -1;                    // which channels are in view (strips / FX follow)
+    int lastKnobRevision = -1;               // follows proc.knobRevision (MIDI knobs on the synth)
     void updateChannelView();
    #if FOURTRACKER_FX_HOST
     std::unique_ptr<FxPage> fxPage;          // VST effects (FX build, standalone only)

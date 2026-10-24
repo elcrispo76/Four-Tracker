@@ -17,6 +17,7 @@ struct ChannelMix
     std::atomic<int>  pan    { 0 };    // -64..64
     std::atomic<int>  pitch  { 0 };    // semitones -24..24
     std::atomic<bool> mute   { false };
+    std::atomic<bool> solo   { false };   // any channel on SOLO: only the solo channels are heard
 };
 
 /** The playback engine: 4 sample channels, FastTracker 2 effects,
@@ -83,6 +84,19 @@ public:
     std::atomic<int>  numChannels    { 4 };      // channels in use: 4, 8 or 16
 
     ChannelMix mix[kNumChannels];
+    /** Silent because of MUTE, or because another channel is on SOLO (and this one isn't). */
+    bool isChannelSilenced (int ch) const noexcept
+    {
+        if (mix[ch].mute.load()) return true;
+        if (mix[ch].solo.load()) return false;
+        for (int c = 0; c < kNumChannels; ++c) if (mix[c].solo.load()) return true;
+        return false;
+    }
+
+    /** MIDI knobs (CC messages) seen by the audio thread, for the synth's MIDI LEARN.
+        The message thread takes them with popController(). */
+    bool popController (int& cc, int& value) noexcept;
+    std::atomic<int> lastController { -1 };   // CC number of the last knob moved (for the UI)
 
     /** Optional per-channel insert (VST effects in the FX build). When set,
         each channel is rendered into its own stereo buffer, passed through
@@ -234,6 +248,9 @@ private:
     bool loopJumpPending = false;
     int  loopJumpRow = 0;
     std::vector<float> monoScratch;
+    juce::AbstractFifo ccFifo { 512 };
+    std::array<std::pair<uint8_t, uint8_t>, 512> ccBuffer {};
+
     std::vector<float> chanScratch;     // kNumChannels * 2 * chanScratchSize, for channelInsert
     int chanScratchSize = 0;
     float* chanL (int ch) noexcept { return chanScratch.data() + (size_t) (ch * 2) * (size_t) chanScratchSize; }

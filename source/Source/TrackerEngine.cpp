@@ -95,9 +95,19 @@ void TrackerEngine::handleMidi (const juce::MidiMessage& m)
         if (m.isMidiStop())  { stopPlayback();  return; }
     }
 
-    if (! m.isNoteOn()) return;
-
     const int chan = midiChannel.load();
+
+    // knobs: queued for the message thread (synth MIDI LEARN); 120-127 are channel mode messages
+    if (m.isController() && m.getControllerNumber() < 120)
+    {
+        if (chan > 0 && m.getChannel() != chan) return;
+        const auto w = ccFifo.write (1);
+        if (w.blockSize1 > 0) ccBuffer[(size_t) w.startIndex1] = { (uint8_t) m.getControllerNumber(), (uint8_t) m.getControllerValue() };
+        lastController = m.getControllerNumber();
+        return;
+    }
+
+    if (! m.isNoteOn()) return;
     if (chan > 0 && m.getChannel() != chan) return;
 
     const int note = m.getNoteNumber();
@@ -118,6 +128,15 @@ void TrackerEngine::handleMidi (const juce::MidiMessage& m)
     {
         selectPattern (note - base - 1);
     }
+}
+
+bool TrackerEngine::popController (int& cc, int& value) noexcept
+{
+    const auto r = ccFifo.read (1);
+    if (r.blockSize1 <= 0) return false;
+    cc = ccBuffer[(size_t) r.startIndex1].first;
+    value = ccBuffer[(size_t) r.startIndex1].second;
+    return true;
 }
 
 // ===========================================================================
@@ -642,7 +661,7 @@ void TrackerEngine::triggerVoice (ChannelState& cs, int startOffset)
         cs.midiChan = cs.inst->p.midiChannel;
         cs.midiProgram = cs.inst->p.midiProgram;
         cs.midiNote = juce::jlimit (0, 127, cs.note - 1 + 12 + cs.inst->p.transpose + mix[ch].pitch.load());
-        cs.midiPending = ! mix[ch].mute.load();      // sent at the end of the tick, with the row's volume
+        cs.midiPending = ! isChannelSilenced (ch);      // sent at the end of the tick, with the row's volume
         if (! cs.midiPending) cs.midiNote = -1;
     }
 
@@ -735,7 +754,7 @@ void TrackerEngine::updateVoiceTargets (int ch)
                * (float) v.inst->p.volume / 64.0f
                * (float) globalVolume / 64.0f
                * (float) mix[ch].volume.load() / 64.0f;
-    if (mix[ch].mute.load()) gain = 0.0f;
+    if (isChannelSilenced (ch)) gain = 0.0f;
 
     const float pan = (float) juce::jlimit (0, 255, cs.pan + mix[ch].pan.load() * 2) / 255.0f;
     v.targetL = gain * (pan <= 0.5f ? 1.0f : 2.0f * (1.0f - pan));

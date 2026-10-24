@@ -88,7 +88,8 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 
 Mouse tricks:
 - Drag value boxes up/down. Hold Shift for fine steps. Use the mouse wheel, or double-click to type a value.
-- Click a CH label to mute that channel.
+- **MUTE** and **SOLO** on each channel strip (lit red when on; clicking the CH label mutes too). With SOLO on one or
+  more channels, only those are heard. MUTE wins over SOLO. Both are saved in the module.
 - Drop audio files on the window to load them into the selected slot (several files fill consecutive slots).
 - Drop a `.ftm` module (or an old `.ftps` pattern set) to load it.
 
@@ -176,6 +177,11 @@ Any instrument slot can be a small synth instead of a sample. On the Instruments
   They work on synths and samples, the filter glides smoothly, and each stays on its channel until the next
   command of the same kind or until playback is started again. `0X64 0Z00 0Y00 0V00` turns them all off.
 - **NEW MODULE → Empty** also removes the VST effects from all channels (FX version).
+- **MIDI LEARN (knobs on your MIDI keyboard):** right-click a synth slider → **MIDI LEARN**, then turn a knob. The
+  slider shows the knob (`CC 74`) and follows it, also while the pattern plays and when another instrument is
+  selected. Each synth slot has its own knobs, so two synths can be played with different knobs. One knob moves one
+  slider only: learning a knob that was already in use takes it away from the old slider. Right-click → **FORGET
+  KNOB** removes it. The knobs listen on the MIDI CHANNEL set on the MIDI / AUDIO page, and are saved in the module.
 - Sliders: click or drag, mouse wheel for fine steps, double-click resets.
 - Setting SOURCE back to SAMPLE clears the slot so you can load a sample.
 - Synth settings are saved in modules and in DAW projects.
@@ -272,10 +278,10 @@ so there are no folders, just press SCAN. Mac keyboards may need **fn** for the 
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.3.0-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.3.0-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.3.0-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.3.0-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.4.0-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.4.0-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.4.0-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.4.0-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes
