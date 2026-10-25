@@ -20,12 +20,18 @@
   you select it.
 - **1 to 16 tracks:** add or remove one track at a time with - TRACKS +. The pattern shows 4 at a time; the
   track bar under the pattern (◀ 1-4 5-8 9-12 13-16 ▶) or Tab moves between them.
-- **Built-in synth:** sine, triangle, saw, square and noise, with ADSR, a resonant low-pass filter, distortion
+- **SYNTH 2:** two oscillators with PW / PWM on every wave (pulse width, shifted saw, skewed triangle, phase-distorted sine), a filter envelope, a tempo-synced LFO (up to two patterns long), chorus,
+  delay and reverb, round knobs, and 26 trance, italo disco and 80s patches; save your own patches as files.
+- **SYNTH 1:** sine, triangle, saw, square and noise, with ADSR, a resonant low-pass filter, distortion
   and accent. Pattern commands 0Xvv / 0Zvv / 0Yvv / 0Vvv change cutoff, resonance, distortion and accent live.
 - **MIDI instruments:** an instrument slot can send MIDI notes (channel 1-16, optional program change) to a
   hardware or software synth.
 - **Sample editor:** loops (forward, ping-pong, backward), fades, normalize, cut / copy / paste, OctaMED-style
   MIX of two samples, Ctrl+A / C / X / V, stereo view.
+- **CHORD mode:** hold several keys and the notes spread over the next tracks, live and in EDIT mode, for
+  samples, synths and MIDI instruments.
+- **MUTE / SOLO** on every track, and **MIDI LEARN** for every synth knob.
+- **Sample pack:** 88 drum, bass and synth sounds (WAV, CC0), installed to Documents\Four Tracker\Samples.
 - **SPACING (0-32):** how many rows the cursor moves after a note and with the up / down arrows.
 - **VST3 effects** in the standalone app: two per track, with bypass, and chaining (send a track on into another
   track's effects, so one reverb or delay can be shared).
@@ -40,6 +46,7 @@
 | `index.html`, `images/`, `Four-Tracker-User-Manual.pdf` | The website (GitHub Pages) |
 | `source/` | The program's source code, build scripts and installer script |
 | `source/BUILDING-AND-USAGE.md` | Keys, effect list, file formats, building and making the installer |
+| `source/installer/Sample Pack/` | The Four Tracker Sample Pack (CC0) that the installer adds |
 | `CREDITS.md` | Third-party software and licences |
 | `CLONE-CHECK.md` | Check of the source against six open-source trackers for copied code |
 | `LICENSE` | GNU AGPLv3 |

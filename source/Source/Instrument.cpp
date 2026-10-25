@@ -25,6 +25,8 @@ void Instrument::sanitise()
     p.distortion = juce::jlimit (0, 64, p.distortion);
     p.accent    = juce::jlimit (0, 64, p.accent);
     for (auto& c : p.cc) if (c < 0 || c > 119) c = -1;
+    for (auto& c : p.cc2) if (c < 0 || c > 119) c = -1;
+    for (int k = 0; k < s2NumParams; ++k) p.s2[(size_t) k] = synth2::clamp (k, p.s2[(size_t) k]);
     p.midiChannel = juce::jlimit (1, 16, p.midiChannel);
     p.midiProgram = juce::jlimit (0, 128, p.midiProgram);
 
@@ -135,6 +137,40 @@ void Instrument::makeSynth (int wave)
     resetPoints();
     if (name.isEmpty() || name == oldAutoName || ! wasSynth) name = juce::String ("SYNTH ") + synthWaveName (wave);
     sourcePath = {};
+    sanitise();
+}
+
+void Instrument::makeSynth2()
+{
+    if (isSynth2()) return;
+    const int vol = isEmpty() ? 64 : params.volume;
+    // One saw cycle at the same rate as SYNTH 1, so the tracker's pitch
+    // handling (portamento, vibrato, arpeggio) drives it; the engine makes
+    // the actual oscillators from the voice's speed through it.
+    constexpr int cycle = 128;
+    SampleData::Ptr d = new SampleData();
+    d->sampleRate = cycle * 261.6255653;
+    d->bitDepth = 16;
+    d->buffer.setSize (1, cycle);
+    auto* w = d->buffer.getWritePointer (0);
+    for (int i = 0; i < cycle; ++i) w[i] = (float) (2.0 * i / cycle - 1.0) * 0.6f;
+    data = d;
+    params = InstrumentParams();
+    params.volume = vol;
+    params.synth2 = true;
+    params.loop = true;
+    params.s2 = synth2::defaults();
+    resetPoints();
+    name = "SYNTH 2 INIT";
+    sourcePath = {};
+    sanitise();
+}
+
+void Instrument::applySynth2Patch (const synth2::Patch& patch)
+{
+    if (! isSynth2()) makeSynth2();
+    params.s2 = patch.values;
+    name = patch.name.toUpperCase();
     sanitise();
 }
 
@@ -489,6 +525,24 @@ juce::String Instrument::loadFromFile (const juce::File& file, juce::AudioFormat
     sourcePath = file.getFullPathName();
     params = InstrumentParams();
     resetPoints();
+
+    // loop points from the WAV file's 'smpl' chunk (made by most sample editors and our sample pack)
+    const auto& md = reader->metadataValues;
+    if (md.getValue ("NumSampleLoops", "0").getIntValue() > 0)
+    {
+        const int ls = md.getValue ("Loop0Start", "-1").getIntValue();
+        const int le = md.getValue ("Loop0End", "-1").getIntValue();      // the last frame of the loop
+        if (ls >= 0 && le > ls && le < frames)
+        {
+            params.loop = true;
+            params.loopStart = ls;
+            params.loopEnd = le;
+            const int type = md.getValue ("Loop0Type", "0").getIntValue();
+            params.pingPong = type == 1;
+            params.loopBackward = type == 2;
+        }
+    }
+    sanitise();
     return {};
 }
 

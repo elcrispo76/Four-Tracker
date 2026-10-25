@@ -12,6 +12,10 @@ specification (Electronic Arts, 1985).
 
 The pixel font, icons and graphics are original to Four Tracker.
 
+The Four Tracker Sample Pack (`source/installer/Sample Pack`) is synthesised from scratch for this
+project (drums in code, bass and synth sounds with Four Tracker's own SYNTH 2). It contains no
+third-party recordings and is released under CC0 1.0 (public domain).
+
 ## Libraries and SDKs
 
 | Component | Used for | License |

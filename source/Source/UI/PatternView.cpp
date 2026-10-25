@@ -383,6 +383,18 @@ void PatternView::enterNote (int note)
     setCursorRow (st.cursorRow + st.editStep, false);
 }
 
+void PatternView::writeChordNote (int row, int channel, int note, bool advanceCursor)
+{
+    const int p = st.viewPattern();
+    if (! isPositiveAndBelow (channel, st.numChannels()) || ! isPositiveAndBelow (row, numRows())) return;
+    st.pushUndo (p);
+    auto& c = pattern().at (row, channel);
+    c.note = (uint8_t) note;
+    c.inst = (uint8_t) st.selectedInstrument();
+    if (advanceCursor) setCursorRow (st.cursorRow + st.editStep, false);
+    else repaint();
+}
+
 void PatternView::enterHexDigit (int d)
 {
     const int p = st.viewPattern();

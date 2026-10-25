@@ -150,7 +150,8 @@ private:
 
     // built-in synth
     PixelButton srcSample { "SAMPLE", PixelButton::Style::Segment, 17.0f },
-                srcSynth  { "SYNTH",  PixelButton::Style::Segment, 17.0f },
+                srcSynth  { "SYNTH 1", PixelButton::Style::Segment, 17.0f },
+                srcSynth2 { "SYNTH 2", PixelButton::Style::Segment, 17.0f },
                 srcMidi   { "MIDI",   PixelButton::Style::Segment, 17.0f };
     ValueBox midiChannelBox { 1, 16, 1, 30.0f }, midiProgramBox { 0, 128, 0, 30.0f };
     bool midiMode = false;
@@ -160,12 +161,28 @@ private:
                 distortion { 0, 64, 0, 0 }, accent { 0, 64, 0, 0 };
     bool synthMode = false;
     std::array<PixelSlider*, 8> synthSliders() { return { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent }; }
-    void showKnobMenu (int param);
+    void showKnobMenu (int param);   // param: 0..7 = SYNTH 1 slider, kSynth2Knob + n = SYNTH 2 knob
+
+    // SYNTH 2: patch bar and knobs
+    bool synth2Mode = false;
+    std::array<std::unique_ptr<PixelKnob>, ft::s2NumParams> knobs;
+    PixelButton patchPrev { "", PixelButton::Style::Raised }, patchNext { "", PixelButton::Style::Raised },
+                patchList { "PATCHES", PixelButton::Style::Raised, 16.0f }, patchSave { "SAVE PATCH", PixelButton::Style::Raised, 16.0f };
+    std::vector<ft::synth2::Patch> patches;
+    juce::Rectangle<int> patchNameBox;
+    struct KnobGroup { juce::String name; juce::Rectangle<int> area; };
+    std::vector<KnobGroup> knobGroups;
+    void choosePatch (int index);
+    int currentPatchIndex() const;
+    void showPatchMenu();
+    void savePatchDialog();
 public:
+    /** Reloads the patch list (factory + the saved patch files). */
+    void refreshPatches();
     /** Updates the "CC 74" badges on the synth sliders (after MIDI LEARN or a knob move). */
     void updateKnobBadges();
 private:
-    enum Source { srcIsSample, srcIsSynth, srcIsMidi };
+    enum Source { srcIsSample, srcIsSynth, srcIsMidi, srcIsSynth2 };
     void setSource (int source);
     void pushSynth();
     void updateSynthVisibility();

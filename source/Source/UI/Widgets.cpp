@@ -640,3 +640,93 @@ void PixelSlider::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)
     if (nv == value) nv += d > 0 ? 1 : -1;     // always move at least one step
     setValue (nv, true);
 }
+
+// ===========================================================================
+// PixelKnob
+// ===========================================================================
+
+PixelKnob::PixelKnob (const String& l, int maxValue, int defaultValue)
+    : label (l), maxV (maxValue), value (jlimit (0, maxValue, defaultValue)), defV (defaultValue)
+{
+    setRepaintsOnMouseActivity (false);
+}
+
+void PixelKnob::setValue (int v, bool notify)
+{
+    v = jlimit (0, maxV, v);
+    if (v == value) return;
+    value = v;
+    repaint();
+    if (notify && onChange) onChange (value);
+}
+
+void PixelKnob::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    const float labelH = 16.0f, valueH = 20.0f;
+
+    // name above
+    Theme::text (g, label, r.removeFromTop (labelH + 2.0f).reduced (1.0f, 0.0f), 12.0f, Theme::ink, Justification::centredTop);
+
+    // value under, in a small black screen
+    auto vr = r.removeFromBottom (valueH).reduced (2.0f, 0.0f);
+    Theme::drawScreen (g, vr);
+    const String txt = formatter ? formatter (value) : String (value);
+    Theme::text (g, txt, vr.reduced (3.0f, 1.0f), 12.0f, Theme::screenText, Justification::centred);
+
+    // the disc: a plain round shape with a line from the centre
+    const float d = jmin (r.getWidth() - 8.0f, r.getHeight() - 6.0f);
+    auto disc = Rectangle<float> (d, d).withCentre (r.getCentre());
+    g.setColour (Theme::panelEdgeLo);
+    g.fillEllipse (disc.translated (1.5f, 2.0f));                 // shadow
+    g.setColour (learn ? Colour (0xffd9342b) : Theme::screen);
+    g.fillEllipse (disc);
+    g.setColour (Theme::panelEdgeHi.withAlpha (0.55f));
+    g.drawEllipse (disc.reduced (1.0f), 1.5f);
+
+    // range ticks at the two ends
+    const float a0 = MathConstants<float>::pi * 1.25f, a1 = -MathConstants<float>::pi * 0.25f;
+    auto pointAt = [&] (float ang, float rad) { return disc.getCentre() + Point<float> (std::cos (ang) * rad, -std::sin (ang) * rad); };
+    g.setColour (Theme::ink.withAlpha (0.6f));
+    for (float ang : { a0, a1 }) g.drawLine (Line<float> (pointAt (ang, d * 0.52f), pointAt (ang, d * 0.62f)), 2.0f);
+
+    const float frac = maxV > 0 ? (float) value / (float) maxV : 0.0f;
+    const float ang = a0 + (a1 - a0) * frac;
+    g.setColour (Theme::screenText);
+    g.drawLine (Line<float> (pointAt (ang, d * 0.08f), pointAt (ang, d * 0.42f)), 3.0f);
+
+    if (badge.isNotEmpty())
+    {
+        auto b = Rectangle<float> (disc.getWidth() + 6.0f, 15.0f).withCentre ({ disc.getCentreX(), disc.getBottom() - 4.0f });
+        g.setColour (learn ? Colours::white : Theme::buttonLight);
+        g.fillRect (b);
+        g.setColour (Theme::ink);
+        g.drawRect (b, 1.0f);
+        Theme::text (g, badge, b, 11.0f, learn ? Colour (0xffd9342b) : Theme::ink, Justification::centred);
+    }
+}
+
+void PixelKnob::mouseDown (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
+    dragStartY = e.position.y;
+    dragStartValue = value;
+}
+
+void PixelKnob::mouseDrag (const MouseEvent& e)
+{
+    if (e.mods.isPopupMenu()) return;
+    const float pxForFull = e.mods.isShiftDown() ? 800.0f : 180.0f;
+    const float dv = (dragStartY - e.position.y) / pxForFull * (float) maxV;
+    setValue (dragStartValue + roundToInt (dv), true);
+}
+
+void PixelKnob::mouseDoubleClick (const MouseEvent&) { setValue (defV, true); }
+
+void PixelKnob::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)
+{
+    // small ranges (waveforms, sync choices): one step per notch; big ranges: a few
+    wheelAcc += w.deltaY * (maxV <= 12 ? 4.0f : (float) maxV / 20.0f);
+    const int steps = (int) wheelAcc;
+    if (steps != 0) { wheelAcc -= (float) steps; setValue (value + steps, true); }
+}

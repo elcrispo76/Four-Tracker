@@ -52,9 +52,130 @@ struct Runner
     }
 };
 
+
+// ---------------------------------------------------------------------------
+// FT_MAKE_PACK=<folder>: renders the sample pack's bass and synth sounds with SYNTH 2
+// ---------------------------------------------------------------------------
+static int makeSamplePack (const File& outDir)
+{
+    auto pp = std::make_unique<FourTrackerProcessor>();
+    pp->prepareToPlay (44100.0, Runner::block);
+    auto& e = pp->getEngine();
+    e.masterVolume = 80;
+    const auto& fp = ft::synth2::factoryPatches();
+    auto patch = [&] (const String& name) -> ft::synth2::Patch
+    {
+        for (auto& p : fp) if (p.name == name) return p;
+        jassertfalse; return fp.front();
+    };
+    int made = 0;
+    auto render = [&] (const String& folder, const String& file, ft::synth2::Patch p, std::vector<int> notes, int root, double hold, double total,
+                       std::function<void (ft::Synth2Values&)> tweak = {})
+    {
+        auto& in = pp->getInstrument (12);
+        in.applySynth2Patch (p);
+        if (tweak) tweak (in.params.s2);
+        pp->instrumentChanged (12);
+        Runner r { *pp };
+        for (size_t i = 0; i < notes.size(); ++i) e.requestJam (12, root + notes[i], (int) i);
+        const int holdBlocks = (int) (hold * 44100.0 / Runner::block), totalBlocks = (int) (total * 44100.0 / Runner::block);
+        r.run (holdBlocks);
+        for (size_t i = 0; i < notes.size(); ++i) e.requestJamOff ((int) i);
+        r.run (jmax (1, totalBlocks - holdBlocks));
+        // let the FX finish ringing before the next sound
+        { Runner flush { *pp }; flush.run ((int) (12.0 * 44100.0 / Runner::block)); }
+
+        auto& b = r.all;
+        float pk = b.getMagnitude (0, b.getNumSamples());
+        if (pk <= 0.0f) { std::cout << "SILENT: " << file << "\n"; return; }
+        // trim the quiet end, fade the last 10 ms, normalise to -1 dB
+        int end = b.getNumSamples();
+        const float floor = pk * 0.0003f;
+        while (end > 1000 && jmax (std::abs (b.getSample (0, end - 1)), std::abs (b.getSample (1, end - 1))) < floor) --end;
+        end = jmin (b.getNumSamples(), end + 441);
+        const int fade = jmin (end, 441);
+        for (int c = 0; c < 2; ++c) b.applyGainRamp (c, end - fade, fade, 1.0f, 0.0f);
+        const float g = 0.891f / pk;
+        bool mono = true;
+        for (int i = 0; i < end && mono; ++i) mono = std::abs (b.getSample (0, i) - b.getSample (1, i)) < 1.0e-4f;
+        AudioBuffer<float> outB (mono ? 1 : 2, end);
+        for (int c = 0; c < outB.getNumChannels(); ++c) { outB.copyFrom (c, 0, b, c, 0, end); outB.applyGain (c, 0, end, g); }
+        auto f = outDir.getChildFile (folder).getChildFile (file + ".wav");
+        f.getParentDirectory().createDirectory();
+        f.deleteFile();
+        WavAudioFormat wav;
+        if (auto os = std::unique_ptr<OutputStream> (f.createOutputStream()))
+            if (auto w = std::unique_ptr<AudioFormatWriter> (wav.createWriterFor (os.get(), 44100.0, (unsigned) outB.getNumChannels(), 16, {}, 0)))
+            {
+                os.release();
+                w->writeFromAudioSampleBuffer (outB, 0, end);
+                ++made;
+            }
+    };
+    const int C1 = ft::kNativeNote - 36, C2 = ft::kNativeNote - 24, C3 = ft::kNativeNote - 12, C4 = ft::kNativeNote, C5 = ft::kNativeNote + 12;
+    using V = ft::Synth2Values;
+
+    // ---- bass (C2) ----
+    render ("Bass", "BASS ACID C2", patch ("TRANCE ACID BASS"), { 0 }, C2, 0.5, 1.2);
+    render ("Bass", "BASS ACID SQUELCH C2", patch ("TRANCE ACID BASS"), { 0 }, C2, 0.5, 1.2, [] (V& k) { k[ft::s2Cutoff] = 62; k[ft::s2Reso] = 112; k[ft::s2EnvAmt] = 118; k[ft::s2FDecay] = 48; });
+    render ("Bass", "BASS ROLLING C2", patch ("TRANCE ROLLING BASS"), { 0 }, C2, 0.35, 0.9);
+    render ("Bass", "BASS OCTAVE C2", patch ("ITALO OCTAVE BASS"), { 0 }, C2, 0.35, 0.9);
+    render ("Bass", "BASS 80S C2", patch ("80S BASS"), { 0 }, C2, 0.5, 1.1);
+    render ("Bass", "BASS SUB C2", patch ("TRANCE SUB SINE"), { 0 }, C2, 0.8, 1.3);
+    render ("Bass", "BASS REESE C1", patch ("INIT"), { 0 }, C1 + 12, 1.6, 2.2, [] (V& k) {
+        k[ft::s2Osc2Wave] = 0; k[ft::s2Osc2Fine] = 92; k[ft::s2OscMix] = 64; k[ft::s2Cutoff] = 62; k[ft::s2Reso] = 25; k[ft::s2EnvAmt] = 10;
+        k[ft::s2LfoShape] = 1; k[ft::s2LfoRate] = 35; k[ft::s2LfoFilter] = 30; k[ft::s2Attack] = 16; k[ft::s2Sustain] = 120; k[ft::s2Release] = 40; });
+    render ("Bass", "BASS PLUCK C2", patch ("INIT"), { 0 }, C2, 0.3, 0.8, [] (V& k) {
+        k[ft::s2Osc2Wave] = 1; k[ft::s2Osc2Semi] = 12; k[ft::s2OscMix] = 40; k[ft::s2Cutoff] = 48; k[ft::s2Reso] = 55; k[ft::s2EnvAmt] = 105;
+        k[ft::s2FDecay] = 37; k[ft::s2Decay] = 43; k[ft::s2Sustain] = 0; k[ft::s2Release] = 30; });
+    render ("Bass", "BASS SQUARE C2", patch ("INIT"), { 0 }, C2, 0.5, 1.0, [] (V& k) {
+        k[ft::s2Osc1Wave] = 1; k[ft::s2Osc1PW] = 25; k[ft::s2Osc2Wave] = 1; k[ft::s2Osc2Semi] = 12; k[ft::s2OscMix] = 40; k[ft::s2Cutoff] = 75;
+        k[ft::s2Reso] = 20; k[ft::s2EnvAmt] = 40; k[ft::s2FDecay] = 46; k[ft::s2Sustain] = 90; k[ft::s2Release] = 30; });
+
+    // ---- leads (C4, HOOVER C3) ----
+    render ("Synth/Leads", "LEAD SUPERSAW C4", patch ("TRANCE SUPERSAW"), { 0 }, C4, 1.2, 3.0);
+    render ("Synth/Leads", "LEAD HOOVER C3", patch ("TRANCE HOOVER"), { 0 }, C3, 1.4, 3.0);
+    render ("Synth/Leads", "LEAD ARP C4", patch ("TRANCE ARP LEAD"), { 0 }, C4, 0.4, 2.2);
+    render ("Synth/Leads", "LEAD SYNC C4", patch ("ITALO SYNC LEAD"), { 0 }, C4, 1.2, 2.6);
+    render ("Synth/Leads", "LEAD SQUARE C4", patch ("80S SQUARE LEAD"), { 0 }, C4, 1.2, 2.4);
+    render ("Synth/Leads", "LEAD DREAM C4", patch ("ITALO DREAM LEAD"), { 0 }, C4, 1.2, 3.0);
+
+    // ---- plucks, keys, bells, brass (C4) ----
+    render ("Synth/Plucks", "PLUCK TRANCE C4", patch ("TRANCE PLUCK"), { 0 }, C4, 0.25, 2.0);
+    render ("Synth/Plucks", "STAB POLY C4", patch ("ITALO POLY STAB"), { 0 }, C4, 0.3, 1.8);
+    render ("Synth/Plucks", "BELL SPACE C5", patch ("ITALO SPACE BELL"), { 0 }, C5, 0.5, 3.0);
+    render ("Synth/Plucks", "KEYS SOFT C4", patch ("80S SOFT KEYS"), { 0 }, C4, 0.8, 2.4);
+    render ("Synth/Plucks", "PLUCK PULSE C4", patch ("ITALO PULSE ARP"), { 0 }, C4, 0.25, 1.6);
+    render ("Synth/Plucks", "PLUCK 80S C4", patch ("80S ARPEGGIO"), { 0 }, C4, 0.25, 1.4);
+    render ("Synth/Brass", "BRASS ITALO C4", patch ("ITALO BRASS"), { 0 }, C4, 0.9, 2.2);
+    render ("Synth/Brass", "BRASS JUMP C4", patch ("80S JUMP BRASS"), { 0 }, C4, 0.9, 2.2);
+
+    // ---- pads (C3) ----
+    render ("Synth/Pads", "PAD JUNO C3", patch ("80S JUNO PAD"), { 0 }, C3, 3.0, 5.0);
+    render ("Synth/Pads", "PAD STRINGS C3", patch ("TRANCE STRINGS"), { 0 }, C3, 3.0, 5.0);
+    render ("Synth/Pads", "PAD CHOIR C3", patch ("ITALO CHOIR PAD"), { 0 }, C3, 3.0, 5.0);
+    render ("Synth/Pads", "PAD 80S STRINGS C3", patch ("80S STRINGS"), { 0 }, C3, 3.0, 5.0);
+    render ("Synth/Pads", "PAD GATED C3", patch ("TRANCE GATE PAD"), { 0 }, C3, 3.0, 4.5);
+    render ("Synth/Pads", "PAD SWEEP C3", patch ("80S SWEEP PAD"), { 0 }, C3, 4.0, 6.0, [] (V& k) { k[ft::s2LfoSync] = 5; });
+
+    // ---- chords (root C) ----
+    render ("Synth/Chords", "CHORD SUPERSAW C MINOR", patch ("TRANCE SUPERSAW"), { 0, 3, 7, 12 }, C4, 0.6, 2.6);
+    render ("Synth/Chords", "CHORD SUPERSAW C MAJOR", patch ("TRANCE SUPERSAW"), { 0, 4, 7, 12 }, C4, 0.6, 2.6);
+    render ("Synth/Chords", "CHORD STAB C MINOR 7", patch ("ITALO POLY STAB"), { 0, 3, 7, 10 }, C4, 0.3, 1.8);
+    render ("Synth/Chords", "CHORD STAB C SUS4", patch ("ITALO POLY STAB"), { 0, 5, 7 }, C4, 0.3, 1.8);
+    render ("Synth/Chords", "CHORD PLUCK C MINOR", patch ("TRANCE PLUCK"), { 0, 3, 7 }, C4, 0.25, 2.0);
+    render ("Synth/Chords", "CHORD BRASS C MAJOR", patch ("ITALO BRASS"), { 0, 4, 7 }, C4, 0.9, 2.2);
+    render ("Synth/Chords", "CHORD PAD C MINOR", patch ("80S JUNO PAD"), { 0, 3, 7 }, C3, 3.0, 5.0);
+    render ("Synth/Chords", "CHORD PAD C MAJOR 7", patch ("TRANCE STRINGS"), { 0, 4, 7, 11 }, C3, 3.0, 5.0);
+
+    std::cout << made << " bass / synth samples written to " << outDir.getFullPathName() << "\n";
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
     ScopedJuceInitialiser_GUI gui;
+    if (auto* pack = std::getenv ("FT_MAKE_PACK")) return makeSamplePack (File (pack));
     const File outDir = argc > 1 ? File::getCurrentWorkingDirectory().getChildFile (argv[1]) : File::getCurrentWorkingDirectory();
     outDir.createDirectory();
     std::cout << "      sizes: processor " << sizeof (FourTrackerProcessor) << " B, editor " << sizeof (FourTrackerEditor) << " B, engine " << sizeof (ft::TrackerEngine) << " B\n";
@@ -349,6 +470,25 @@ int main (int argc, char** argv)
         CHECK (true, "8SVX: any VHDR volume value (0, 64, 1, 0x8000, 0x10000, 0xFFFFFFFF) gives a playable instrument");
         CHECK (in2.params.loop && in2.params.loopStart == 600 && in2.params.loopEnd == 999, "8SVX: loop 600-999 from oneShot/repeat");
         CHECK (std::abs (in2.data->buffer.getSample (0, 1) - (-98.0f / 128.0f)) < 1.0e-5f, "8SVX: signed 8-bit values decoded");
+
+        // WAV smpl chunk loop (like the sample pack's CHIP waves): forward loop 0..63
+        {
+            auto wf = File::getSpecialLocation (File::tempDirectory).getChildFile ("ft-loop.wav");
+            wf.deleteFile();
+            AudioBuffer<float> wb (1, 64);
+            for (int i = 0; i < 64; ++i) wb.setSample (0, i, i < 32 ? 0.5f : -0.5f);
+            StringPairArray meta;
+            meta.set ("NumSampleLoops", "1"); meta.set ("Loop0Type", "0"); meta.set ("Loop0Start", "0"); meta.set ("Loop0End", "63");
+            meta.set ("MidiUnityNote", "60");
+            WavAudioFormat wav;
+            if (auto os = std::unique_ptr<OutputStream> (wf.createOutputStream()))
+                if (auto w = std::unique_ptr<AudioFormatWriter> (wav.createWriterFor (os.get(), 16744.0, 1, 16, meta, 0)))
+                { os.release(); w->writeFromAudioSampleBuffer (wb, 0, 64); }
+            auto errL = pA->loadInstrument (9, wf);
+            const auto& il = pA->getInstrument (9);
+            CHECK (errL.isEmpty() && il.params.loop && ! il.params.pingPong && il.params.loopStart == 0 && il.params.loopEnd == 63,
+                   "WAV smpl loop read: forward loop 0-63 (" + errL + ")");
+        }
 
         // Fibonacci-delta: start value 0, codes 9 (+1) repeated -> 0,1,2,3...
         std::vector<int8_t> fib (2 + 50); fib[0] = 0; fib[1] = 0;
@@ -1435,7 +1575,7 @@ int main (int argc, char** argv)
             ps->selectedInstrument = 9;
             if (auto* b = findBtn (*eds, "INSTRUMENTS")) b->triggerClick();
             MessageManager::getInstance()->runDispatchLoopUntil (30);
-            if (auto* b = findBtn (*eds, "SYNTH")) b->triggerClick();
+            if (auto* b = findBtn (*eds, "SYNTH 1")) b->triggerClick();
             MessageManager::getInstance()->runDispatchLoopUntil (30);
             CHECK (ps->getInstrument (9).isSynth() && ps->getInstrument (9).params.synthWave == ft::waveSine, "SYNTH button turns an empty slot into a sine synth");
             if (auto* b = findBtn (*eds, "SQUARE")) b->triggerClick();
@@ -1630,6 +1770,397 @@ int main (int argc, char** argv)
         }
         es.mix[0].solo = false; es.mix[13].solo = false;
         eds.reset();
+    }
+
+    // SYNTH 2: two oscillators, filter, LFO, FX and patches
+    {
+        auto p2 = std::make_unique<FourTrackerProcessor>();
+        p2->prepareToPlay (44100.0, Runner::block);
+        auto& e2 = p2->getEngine();
+        auto& in = p2->getInstrument (11);
+        in.makeSynth2();
+        auto& k = in.params.s2;
+        CHECK (in.isSynth2() && ! in.isSynth() && in.name == "SYNTH 2 INIT", "SYNTH 2: a slot can be SYNTH 2");
+
+        auto render = [&] (int blocks)
+        {
+            Runner r { *p2 };
+            r.run (blocks);
+            return r.all;
+        };
+        auto crossings = [] (const AudioBuffer<float>& b, int from, int to)
+        {
+            int n = 0;
+            for (int i = jmax (1, from); i < jmin (to, b.getNumSamples()); ++i)
+                if ((b.getSample (0, i - 1) < 0.0f) != (b.getSample (0, i) < 0.0f)) ++n;
+            return n;
+        };
+        auto rms = [] (const AudioBuffer<float>& b, int from, int to)
+        {
+            double e = 0; int n = 0;
+            for (int i = from; i < jmin (to, b.getNumSamples()); ++i, ++n) e += (double) b.getSample (0, i) * b.getSample (0, i);
+            return n > 0 ? std::sqrt (e / n) : 0.0;
+        };
+
+        // pitch: a sine at C-4 is middle C
+        k[ft::s2Osc1Wave] = 3; k[ft::s2OscMix] = 0; k[ft::s2Cutoff] = 127; k[ft::s2Reso] = 0; k[ft::s2EnvAmt] = 0; k[ft::s2Sustain] = 127;
+        p2->instrumentChanged (11);
+        e2.requestPreview (11, ft::kNativeNote);
+        auto a = render (200);                                   // ~1.16 s
+        const double hz = crossings (a, 4410, 4410 + 44100) / 2.0;
+        CHECK (std::abs (hz - 261.6) < 6.0, "SYNTH 2: C-4 plays middle C (" + String (hz, 1) + " Hz)");
+        e2.requestStopPreview();
+        render (40);
+
+        // OSC 2 an octave up, mixed in: the sound gets brighter (more crossings)
+        k[ft::s2Osc2Wave] = 3; k[ft::s2Osc2Semi] = 36; k[ft::s2OscMix] = 127;
+        p2->instrumentChanged (11);
+        e2.requestPreview (11, ft::kNativeNote);
+        a = render (120);
+        const double hz2 = crossings (a, 4410, 4410 + 22050) / 1.0;
+        CHECK (std::abs (hz2 - 523.3) < 12.0, "SYNTH 2: OSC 2 at +12 plays an octave up (" + String (hz2, 1) + " Hz)");
+        e2.requestStopPreview();
+        render (40);
+
+        // PW changes the sound on every OSC 1 wave (pulse width, saw shift, triangle skew, sine phase distortion)
+        {
+            k[ft::s2OscMix] = 0; k[ft::s2LfoPwm] = 0; k[ft::s2Chorus] = 0; k[ft::s2DelayMix] = 0; k[ft::s2ReverbMix] = 0;
+            auto take = [&] (int wave, int pwv)
+            {
+                k[ft::s2Osc1Wave] = wave; k[ft::s2Osc1PW] = pwv;
+                p2->instrumentChanged (11);
+                e2.requestPreview (11, ft::kNativeNote);
+                auto b = render (60);
+                e2.requestStopPreview();
+                render (40);
+                return b;
+            };
+            auto diff = [] (const AudioBuffer<float>& x, const AudioBuffer<float>& y)
+            {
+                double d = 0, e = 0;
+                for (int i = 4000; i < jmin (x.getNumSamples(), y.getNumSamples()); ++i)
+                {
+                    const double u = x.getSample (0, i), w = y.getSample (0, i);
+                    d += (u - w) * (u - w); e += u * u;
+                }
+                return e > 0 ? std::sqrt (d / e) : 0.0;
+            };
+            const char* names[] = { "SAW", "PULSE", "TRI", "SINE" };
+            for (int w = 0; w < 4; ++w)
+            {
+                auto a0 = take (w, 0), a0b = take (w, 0), a1 = take (w, 127);
+                const double same = diff (a0, a0b), changed = diff (a0, a1);
+                CHECK (same < 0.05 && changed > 0.3,
+                       String ("SYNTH 2: PW changes the ") + names[w] + " wave (same " + String (same, 3) + ", changed " + String (changed, 3) + ")");
+            }
+            k[ft::s2Osc1PW] = 0;
+        }
+
+        // every factory patch makes a sound, and none blows up
+        const auto& fp = ft::synth2::factoryPatches();
+        CHECK (fp.size() >= 21, "SYNTH 2: " + String ((int) fp.size()) + " factory patches");
+        int silent = 0, loud = 0;
+        String bad;
+        for (auto& patch : fp)
+        {
+            in.applySynth2Patch (patch);
+            p2->instrumentChanged (11);
+            e2.requestPreview (11, ft::kNativeNote - 12);
+            auto b = render (100);
+            e2.requestStopPreview();
+            render (60);
+            const double v = rms (b, 2000, b.getNumSamples());
+            float pk = 0.0f;
+            for (int i = 0; i < b.getNumSamples(); ++i) pk = jmax (pk, std::abs (b.getSample (0, i)), std::abs (b.getSample (1, i)));
+            if (v < 0.003 || ! std::isfinite (v)) { ++silent; bad << patch.name << " (silent) "; }
+            if (pk > 1.5f) { ++loud; bad << patch.name << " (" << String (pk, 2) << ") "; }
+        }
+        CHECK (silent == 0 && loud == 0, "SYNTH 2: every factory patch plays at a sane level " + bad);
+        CHECK (in.name == fp.back().name, "SYNTH 2: choosing a patch names the instrument after it");
+
+        // a demo WAV: each patch plays a short phrase (written when screenshots are made)
+        if (screens)
+        {
+            AudioBuffer<float> demo (2, 0);
+            int at = 0;
+            auto& pat = e2.getPattern (1);
+            for (auto& patch : fp)
+            {
+                in.applySynth2Patch (patch);
+                p2->instrumentChanged (11);
+                pat.clear(); pat.numRows = 32;
+                const bool bass = patch.name.contains ("BASS");
+                const int base = ft::kNativeNote - (bass ? 24 : 12);
+                const int notes[] = { 0, 7, 12, 7, 3, 10, 15, 10 };
+                const bool slow = patch.name.contains ("PAD") || patch.name.contains ("STRINGS") || patch.name.contains ("CHOIR") || patch.name.contains ("SWEEP");
+                for (int i = 0; i < (slow ? 2 : 8); ++i)
+                {
+                    pat.at (i * (slow ? 8 : 2), 0) = { (uint8_t) (base + notes[i * (slow ? 4 : 1)]), 11, 0, 0 };
+                    if (! slow) pat.at (i * 2 + 1, 0) = { ft::kNoteOff, 0, 0, 0 };
+                }
+                pat.at (16, 0) = { ft::kNoteOff, 0, 0, 0 };
+                e2.speed = 6; e2.bpm = 128;
+                e2.requestPattern (1);
+                e2.requestStartStop();
+                auto b = render (520);              // ~3 s incl. the FX tail
+                e2.requestStop();
+                render (20);
+                demo.setSize (2, at + b.getNumSamples(), true);
+                for (int c = 0; c < 2; ++c) demo.copyFrom (c, at, b, c, 0, b.getNumSamples());
+                at += b.getNumSamples();
+            }
+            auto wf = outDir.getChildFile ("synth2-patches.wav");
+            wf.deleteFile();
+            WavAudioFormat wav;
+            if (auto os = std::unique_ptr<OutputStream> (wf.createOutputStream()))
+                if (auto w = std::unique_ptr<AudioFormatWriter> (wav.createWriterFor (os.get(), 44100.0, 2, 16, {}, 0)))
+                {
+                    os.release();
+                    w->writeFromAudioSampleBuffer (demo, 0, demo.getNumSamples());
+                }
+            std::cout << "      synth2 demo: " << wf.getFullPathName() << " (" << demo.getNumSamples() / 44100 << " s)\n";
+        }
+
+        // LFO synced to the pattern: SQUARE on pitch, 1 pattern long -> two halves at different pitches
+        in.applySynth2Patch (fp.front());
+        k[ft::s2Osc1Wave] = 3; k[ft::s2OscMix] = 0; k[ft::s2Cutoff] = 127; k[ft::s2EnvAmt] = 0; k[ft::s2Sustain] = 127;
+        k[ft::s2LfoShape] = 3; k[ft::s2LfoSync] = 7; k[ft::s2LfoPitch] = 64;
+        p2->instrumentChanged (11);
+        e2.getPattern (0).clear();
+        e2.getPattern (0).numRows = 16;            // 16 rows x 0.12 s = 1.92 s
+        e2.speed = 6; e2.bpm = 125;
+        e2.requestPattern (0);
+        e2.requestStartStop();
+        e2.requestPreview (11, ft::kNativeNote);
+        a = render (420);                           // ~2.4 s
+        const double first = crossings (a, 4410, 4410 + 22050) * 2.0, second = crossings (a, 52000, 52000 + 22050) * 2.0;
+        CHECK (first > second * 1.25, "SYNTH 2: LFO SYNC 1 PATT moves the pitch over the pattern (" + String (first / 2) + " -> " + String (second / 2) + " Hz)");
+        CHECK (std::abs (ft::synth2::lfoSyncRows (7, 64) - 64.0) < 1e-9 && std::abs (ft::synth2::lfoSyncRows (8, 64) - 128.0) < 1e-9,
+               "SYNTH 2: LFO SYNC 1 PATT / 2 PATT = the pattern's rows / twice that");
+        e2.requestStopPreview();
+        e2.requestStop();
+        render (40);
+
+        // DELAY: echoes keep ringing after a short note
+        auto tailEnergy = [&] (int dmix)
+        {
+            in.applySynth2Patch (fp.front());
+            k[ft::s2Decay] = 30; k[ft::s2Sustain] = 0; k[ft::s2Release] = 10;
+            k[ft::s2DelayMix] = dmix; k[ft::s2DelayFb] = 80; k[ft::s2DelayTime] = 3;
+            p2->instrumentChanged (11);
+            auto& pat = e2.getPattern (0);
+            pat.clear(); pat.numRows = 64;
+            pat.at (0, 0) = { (uint8_t) ft::kNativeNote, 11, 0, 0 };
+            e2.requestPattern (0);
+            e2.requestStartStop();
+            auto b = render (300);                  // 1.7 s: the note is gone after ~0.2 s
+            e2.requestStop();
+            render (40);
+            return rms (b, 30000, b.getNumSamples());
+        };
+        const double dry = tailEnergy (0), wet = tailEnergy (110);
+        CHECK (wet > dry * 5.0 && wet > 0.001, "SYNTH 2: DELAY echoes ring on after the note (" + String (dry, 5) + " -> " + String (wet, 5) + ")");
+
+        // the same FX when playing the synth from the computer keys / clicking the slot (the preview voice)
+        auto previewRun = [&] (int cho, int dmix, int rmix, double& during, double& after)
+        {
+            in.applySynth2Patch (fp.front());
+            k[ft::s2Sustain] = 127; k[ft::s2Release] = 10;
+            k[ft::s2Chorus] = cho; k[ft::s2DelayMix] = dmix; k[ft::s2DelayFb] = 70; k[ft::s2DelayTime] = 3; k[ft::s2ReverbMix] = rmix; k[ft::s2ReverbSize] = 100;
+            p2->instrumentChanged (11);
+            e2.requestPreview (11, ft::kNativeNote);
+            auto b1 = render (60);                  // 0.35 s held
+            e2.requestStopPreview();
+            auto b2 = render (200);                 // 1.2 s after the key is let go
+            during = rms (b1, 4000, b1.getNumSamples());
+            after = rms (b2, 8000, b2.getNumSamples());
+            // the difference between the two sides: a chorus makes the sound wide
+            double side = 0;
+            for (int i = 4000; i < b1.getNumSamples(); ++i) side += std::abs (b1.getSample (0, i) - b1.getSample (1, i));
+            return side / jmax (1, b1.getNumSamples() - 4000);
+        };
+        double d0, a0, d1, a1, d2, a2, d3, a3;
+        const double side0 = previewRun (0, 0, 0, d0, a0);
+        const double side1 = previewRun (120, 0, 0, d1, a1);
+        previewRun (0, 110, 0, d2, a2);
+        previewRun (0, 0, 120, d3, a3);
+        render (2000);                              // let everything ring out
+        CHECK (side1 > side0 + 0.01, "SYNTH 2 preview: CHORUS makes the sound wide (" + String (side0, 4) + " -> " + String (side1, 4) + ")");
+        CHECK (a2 > a0 * 10.0 && a2 > 0.002, "SYNTH 2 preview: DELAY echoes after the key is let go (" + String (a0, 5) + " -> " + String (a2, 5) + ")");
+        CHECK (a3 > a0 * 10.0 && a3 > 0.002, "SYNTH 2 preview: REVERB rings after the key is let go (" + String (a0, 5) + " -> " + String (a3, 5) + ")");
+
+        // saved in the module: knobs, name, MIDI knobs
+        in.applySynth2Patch (fp[2]);
+        in.params.cc2[ft::s2Cutoff] = 74;
+        p2->instrumentChanged (11);
+        auto f = outDir.getChildFile ("synth2.ftm");
+        p2->saveModule (f);
+        auto p3 = std::make_unique<FourTrackerProcessor>();
+        CHECK (p3->loadModule (f).isEmpty() && p3->getInstrument (11).isSynth2() && p3->getInstrument (11).params.s2 == fp[2].values
+               && p3->getInstrument (11).name == fp[2].name && p3->getInstrument (11).params.cc2[ft::s2Cutoff] == 74,
+               "SYNTH 2: the knobs, the patch name and the MIDI knobs are saved in the module");
+
+        // your own patches: saved as files, listed after the factory ones
+        ft::Synth2Values mine = fp[5].values;
+        mine[ft::s2Cutoff] = 33;
+        File written;
+        const auto r = ft::synth2::savePatch ("Test Patch Zz", mine, written);
+        auto all = ft::synth2::allPatches();
+        bool found = false;
+        for (auto& pp : all) found = found || (pp.name == "TEST PATCH ZZ" && ! pp.factory && pp.values == mine);
+        CHECK (r.wasOk() && written.existsAsFile() && found && (int) all.size() > (int) fp.size(), "SYNTH 2: a saved patch comes back in the patch list");
+        written.deleteFile();
+
+        // MIDI LEARN on a SYNTH 2 knob
+        Runner rk { *p2 };
+        p2->startSynthLearn (11, FourTrackerProcessor::kSynth2Knob + ft::s2Reso);
+        rk.run (1, [] (int, MidiBuffer& mb) { mb.addEvent (MidiMessage::controllerEvent (1, 71, 5), 0); });
+        p2->applyMidiKnobs();
+        rk.run (1, [] (int, MidiBuffer& mb) { mb.addEvent (MidiMessage::controllerEvent (1, 71, 100), 0); });
+        p2->applyMidiKnobs();
+        CHECK (in.params.cc2[ft::s2Reso] == 71 && in.params.s2[ft::s2Reso] == 100, "SYNTH 2: MIDI LEARN on a knob (CC 71 -> RESO)");
+        p2->startSynthLearn (11, FourTrackerProcessor::kSynth2Knob + ft::s2LfoShape);
+        rk.run (1, [] (int, MidiBuffer& mb) { mb.addEvent (MidiMessage::controllerEvent (1, 71, 5), 0); });
+        p2->applyMidiKnobs();
+        rk.run (1, [] (int, MidiBuffer& mb) { mb.addEvent (MidiMessage::controllerEvent (1, 71, 127), 0); });
+        p2->applyMidiKnobs();
+        CHECK (in.params.cc2[ft::s2Reso] == -1 && in.params.s2[ft::s2LfoShape] == 3, "SYNTH 2: a knob moved to another knob; stepped knobs reach their last step");
+
+        // the panel: SYNTH 2 button, 26 knobs with MIDI LEARN, patch bar
+        p2->selectedInstrument = 11;
+        in.applySynth2Patch (fp[1]);
+        in.params.cc2[ft::s2Cutoff] = 74;
+        p2->instrumentChanged (11);
+        std::unique_ptr<AudioProcessorEditor> ed2 (p2->createEditor());
+        ed2->setSize (1536, 1024);
+        std::function<Component* (Component&, std::function<bool (Component&)>)> find2 =
+            [&] (Component& c, std::function<bool (Component&)> pred) -> Component*
+        {
+            for (auto* ch : c.getChildren()) { if (pred (*ch)) return ch; if (auto* fnd = find2 (*ch, pred)) return fnd; }
+            return nullptr;
+        };
+        if (auto* tab = dynamic_cast<Button*> (find2 (*ed2, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "INSTRUMENTS"; })))
+            tab->triggerClick();
+        MessageManager::getInstance()->runDispatchLoopUntil (120);
+        int knobsShown = 0, knobsLearn = 0;
+        std::function<void (Component&)> count = [&] (Component& c)
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* kn = dynamic_cast<PixelKnob*> (ch)) if (kn->isVisible()) { ++knobsShown; if (kn->onRightClick) ++knobsLearn; }
+                count (*ch);
+            }
+        };
+        count (*ed2);
+        auto* s2btn = dynamic_cast<PixelButton*> (find2 (*ed2, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "SYNTH 2" && b->isVisible(); }));
+        CHECK (s2btn != nullptr && s2btn->getToggleState(), "SYNTH 2: the SOURCE row has SYNTH 2, lit for this slot");
+        CHECK (knobsShown == ft::s2NumParams && knobsLearn == ft::s2NumParams, "SYNTH 2: all " + String ((int) ft::s2NumParams) + " knobs shown, each with MIDI LEARN");
+        auto* nextBtn = dynamic_cast<PixelButton*> (find2 (*ed2, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "PATCHES" && b->isVisible(); }));
+        CHECK (nextBtn != nullptr, "SYNTH 2: the patch bar is there");
+        if (screens)
+        {
+            auto img = ed2->createComponentSnapshot (ed2->getLocalBounds(), true, 1.0f);
+            auto file2 = outDir.getChildFile ("21_synth2.png"); file2.deleteFile();
+            FileOutputStream fos (file2); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        ed2.reset();
+    }
+
+    // CHORD: held keys go to the next tracks (sound and, in EDIT mode, the pattern)
+    {
+        auto pc2 = std::make_unique<FourTrackerProcessor>();
+        pc2->prepareToPlay (44100.0, Runner::block);
+        auto& ec = pc2->getEngine();
+        Runner rc { *pc2 };
+
+        // the engine: three notes on three tracks, each heard on its own track
+        std::array<double, ft::kNumChannels> energy {};
+        ec.channelInsert = [&] (int ch, float* l, float* r, int n)
+        { for (int i = 0; i < n; ++i) energy[(size_t) ch] += (double) l[i] * l[i] + (double) r[i] * r[i]; };
+        pc2->getInstrument (9).makeSynth2();  pc2->instrumentChanged (9);
+        ec.requestJam (9, ft::kNativeNote, 0);
+        ec.requestJam (9, ft::kNativeNote + 4, 1);
+        ec.requestJam (9, ft::kNativeNote + 7, 2);
+        rc.run (60);
+        CHECK (energy[0] > 0 && energy[1] > 0 && energy[2] > 0 && energy[3] == 0, "CHORD: three notes play on tracks 1, 2 and 3");
+        ec.mix[1].mute = true;
+        energy.fill (0.0);
+        ec.requestJam (9, ft::kNativeNote + 4, 1);
+        rc.run (30);
+        CHECK (energy[1] == 0 && energy[0] > 0, "CHORD: a muted track stays quiet");
+        ec.mix[1].mute = false;
+        for (int c = 0; c < 3; ++c) ec.requestJamOff (c);
+        rc.run (200);
+        energy.fill (0.0);
+        rc.run (20);
+        CHECK (energy[0] < 1e-6 && energy[2] < 1e-6, "CHORD: letting go stops the notes");
+        ec.channelInsert = nullptr;
+
+        // MIDI instruments: one MIDI note per held key
+        pc2->getInstrument (10).makeMidi(); pc2->instrumentChanged (10);
+        std::vector<int> ons;
+        AudioBuffer<float> buf (2, Runner::block);
+        MidiBuffer mb;
+        ec.requestJam (10, ft::kNativeNote, 0);
+        ec.requestJam (10, ft::kNativeNote + 3, 1);
+        ec.requestJam (10, ft::kNativeNote + 7, 2);
+        pc2->processBlock (buf, mb);
+        for (const auto m : mb) if (m.getMessage().isNoteOn()) ons.push_back (m.getMessage().getNoteNumber());
+        CHECK (ons.size() == 3 && ons[0] == 60 && ons[1] == 63 && ons[2] == 67, "CHORD: a MIDI instrument sends one note per key (" + String ((int) ons.size()) + ")");
+        mb.clear();
+        for (int c = 0; c < 3; ++c) ec.requestJamOff (c);
+        pc2->processBlock (buf, mb);
+        int offs = 0;
+        for (const auto m : mb) if (m.getMessage().isNoteOff()) ++offs;
+        CHECK (offs == 3, "CHORD: ...and three note-offs when the keys are let go");
+
+        // the editor: CHORD + EDIT writes the chord on one row, one track per key
+        std::unique_ptr<AudioProcessorEditor> edc2 (pc2->createEditor());
+        edc2->setSize (1536, 1024);
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        auto& pat = ec.getPattern (0);
+        pat.clear();
+        pc2->selectedInstrument = 9;
+        edc2->keyPressed (KeyPress (KeyPress::spaceKey, ModifierKeys(), ' '));    // EDIT on
+        auto* chordBtn = dynamic_cast<PixelButton*> ([&]
+        {
+            std::function<Component* (Component&)> f = [&] (Component& c) -> Component*
+            {
+                for (auto* ch : c.getChildren()) { if (auto* b = dynamic_cast<PixelButton*> (ch)) if (b->getButtonText() == "CHORD") return b; if (auto* x = f (*ch)) return x; }
+                return nullptr;
+            };
+            return f (*edc2);
+        }());
+        CHECK (chordBtn != nullptr, "CHORD button in the top bar");
+        if (chordBtn) chordBtn->onClick();
+        CHECK (pc2->chordMode, "CHORD button turns chord mode on");
+        edc2->keyPressed (KeyPress (KeyPress::homeKey));
+        edc2->keyPressed (KeyPress ('z', ModifierKeys(), 'z'));   // C
+        edc2->keyPressed (KeyPress ('c', ModifierKeys(), 'c'));   // E
+        edc2->keyPressed (KeyPress ('b', ModifierKeys(), 'b'));   // G
+        CHECK (pat.at (0, 0).note != 0 && pat.at (0, 1).note == pat.at (0, 0).note + 4 && pat.at (0, 2).note == pat.at (0, 0).note + 7
+               && pat.at (0, 1).inst == 9 && pat.at (1, 0).note == 0,
+               "CHORD + EDIT: C, E and G go on row 0 of tracks 1, 2 and 3");
+        edc2->keyStateChanged (false);                            // all keys let go
+        edc2->keyPressed (KeyPress ('x', ModifierKeys(), 'x'));   // D: a single note
+        edc2->keyStateChanged (false);
+        CHECK (pat.at (1, 0).note == pat.at (0, 0).note + 2 && pat.at (1, 1).note == 0, "CHORD + EDIT: the cursor moved on, a single note is a single note");
+        // too few tracks to the right: the extra key is left out
+        edc2->keyPressed (KeyPress (KeyPress::homeKey));
+        for (int i = 0; i < 3; ++i) edc2->keyPressed (KeyPress (KeyPress::tabKey));   // track 4
+        edc2->keyPressed (KeyPress ('z', ModifierKeys(), 'z'));
+        edc2->keyPressed (KeyPress ('c', ModifierKeys(), 'c'));
+        edc2->keyStateChanged (false);
+        CHECK (pat.at (0, 3).note != 0, "CHORD: on the last track only the first note fits (no wrap-around)");
+        if (screens)
+        {
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            auto img = edc2->createComponentSnapshot (edc2->getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("22_chord.png"); file.deleteFile();
+            FileOutputStream fos (file); PNGImageFormat().writeImageToStream (img, fos);
+        }
+        pc2->chordMode = false;
+        edc2.reset();
     }
 
     // FX chaining: a channel's sound can go on into another channel's effects

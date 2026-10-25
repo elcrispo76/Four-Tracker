@@ -21,6 +21,20 @@ straight to it. The channel strips and the FX lists follow the view.
 - Modules remember their number of tracks; older modules load with 4. The plugin keeps it in the DAW project.
 - Removing a track clears its notes in all patterns (and its effects in the FX version).
 
+## CHORD (several notes at once)
+
+**CHORD** (under EDIT in the top bar) lets you hold several note keys at once. The first key plays on the track the
+cursor is on, the next key on the track to the right, and so on. It works for samples, SYNTH 1, SYNTH 2 and MIDI
+instruments (one MIDI note per key).
+
+- **EDIT off:** the notes are only heard, each on its own track, through that track's VOL / PAN / MUTE / SOLO and its
+  effects.
+- **EDIT on:** the chord is written on the cursor's row, one note per track, and the cursor moves on (SPACING) after
+  the first note. A single key is a single note, as before.
+- There is no wrap-around: on the last track only the notes that fit to the right are used. Add tracks with **+** for
+  bigger chords.
+- The MIDI keyboard's keys still switch patterns; CHORD is for the computer keyboard.
+
 ## MIDI instruments (MIDI out)
 
 On the Instruments page, **SOURCE → MIDI** turns a slot into a MIDI instrument: its notes are sent as MIDI instead
@@ -157,9 +171,9 @@ The effect numbers follow **FastTracker 2**. 00-0F are the classic ProTracker/MO
   hold a demo. That way it makes sound straight away and you can try the live switching (C#2, D-2, D#2, E-2).
   Replace them with your own samples.
 
-## Built-in synth
+## Built-in synth (SYNTH 1)
 
-Any instrument slot can be a small synth instead of a sample. On the Instruments page set **SOURCE** to **SYNTH**:
+Any instrument slot can be a small synth instead of a sample. On the Instruments page set **SOURCE** to **SYNTH 1**:
 
 - **Waveform:** SINE, TRIANGLE, SAW, SQUARE or NOISE. The wave is one looping cycle (like the chip sounds on
   Amiga modules), tuned so C-4 plays middle C. All effects work on it as on a sample.
@@ -185,6 +199,29 @@ Any instrument slot can be a small synth instead of a sample. On the Instruments
 - Sliders: click or drag, mouse wheel for fine steps, double-click resets.
 - Setting SOURCE back to SAMPLE clears the slot so you can load a sample.
 - Synth settings are saved in modules and in DAW projects.
+
+## SYNTH 2 (2 oscillators, LFO, FX, patches)
+
+On the Instruments page, **SOURCE → SYNTH 2** turns a slot into a bigger synth with round knobs (the first synth is
+now called **SYNTH 1**).
+
+- **Patches:** ◀ / ▶ step through them, **PATCHES** opens the list (TRANCE, ITALO DISCO, 80S and YOUR PATCHES), and
+  **SAVE PATCH** saves the knobs under a name in `Documents\Four Tracker\Synth 2 Patches` (one `.ft2patch` file per
+  patch, so they can be copied or shared). 26 factory patches: supersaw, plucks, gated pad, acid and rolling bass,
+  hoover, strings, octave bass, brass, poly stab, choir, bells, Juno pad, sweep pads and more.
+- **OSC 1:** WAVE (saw, pulse, triangle, sine) and PW, which shapes every wave: pulse width on PULSE, a shifted second saw on SAW (hollow, phasing), a skewed peak on TRI and phase distortion on SINE (50 % = the plain wave). It also shapes OSC 2. **OSC 2:** WAVE (also noise), SEMI (-24..+24),
+  FINE (±50 cents) and MIX (OSC 1 → OSC 2).
+- **FILTER:** resonant low-pass with CUTOFF, RESO, its own envelope (ENV AMT, F.DECAY).
+- **AMP:** ATTACK, DECAY, SUSTAIN, RELEASE.
+- **LFO:** SHAPE (sine, triangle, saw, square), SYNC (FREE, 1/16, 1/8, 1/4, 1/2, 1 BAR, 2 BARS, 1 PATT, 2 PATT) and
+  RATE (for FREE). With SYNC the LFO follows the tempo and starts with the pattern, so 1 PATT / 2 PATT is one sweep
+  over one or two whole patterns. **LFO TO:** PITCH, PWM and FILTER.
+- **FX:** CHORUS, DELAY (TIME in notes at the song's tempo, FEEDBACK, MIX, ping-pong) and REVERB (SIZE, MIX). The FX
+  run on the track the synth plays on, so echoes and reverb ring on after the note.
+- Knobs: drag up / down (Shift = fine), mouse wheel, double-click = default. **Right-click → MIDI LEARN** works on every
+  knob, as on SYNTH 1 (each slot has its own knobs; one MIDI knob moves one knob).
+- The sound commands `0X` / `0Z` / `0Y` / `0V` work on SYNTH 2 too. Knobs, patch name and MIDI knobs are saved in the
+  module.
 
 ## Saving
 
@@ -278,10 +315,10 @@ so there are no folders, just press SCAN. Mac keyboards may need **fn** for the 
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.4.0-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.4.0-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.4.0-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.4.0-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.5.0-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.0-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.0-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.0-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes

@@ -5,6 +5,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <set>
+#include <map>
 #include "PluginProcessor.h"
 #include "UI/EditorState.h"
 #include "UI/HeaderBar.h"
@@ -93,6 +94,12 @@ private:
     bool jamNoteDown = false;
     int  jamInstrument = 0;
     std::set<int> heldNoteKeys;   // note keys currently held, so key auto-repeat doesn't retrigger
+    // CHORD: which track each held key plays on (offset from the first key's track) and its instrument
+    struct ChordKey { int offset; int channel; int inst; };
+    std::map<int, ChordKey> chordKeys;
+    int chordBaseCh = 0, chordRow = 0;
+    bool chordNoteDown (int keyCode, int note);
+    void releaseChordKeys (bool all);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FourTrackerEditor)
 };

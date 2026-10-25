@@ -108,6 +108,7 @@ SampleBrowser::~SampleBrowser()
 void SampleBrowser::open()
 {
     auto start = lastSampleFolder();
+    if (! start.isDirectory()) start = FourTrackerProcessor::getUserFolder().getChildFile ("Samples");   // the sample pack (installer)
     if (! start.isDirectory()) start = FourTrackerProcessor::getUserFolder();
     if (! start.isDirectory()) start = File::getSpecialLocation (File::userDocumentsDirectory);
 

@@ -8,7 +8,7 @@ Mappen indeholder hele hjemmesiden:
 
 1. Ret dine links
    Åbn index.html i Notesblok og find blokken "Edit these links" nederst:
-     download: linket til installationsfilen (FourTracker-Setup-0.1.0-share.exe)
+     download: linket til installationsfilen (FourTracker-Setup-0.5.0-share-fx.exe)
      donate:   linket til din donationsside (Ko-fi, PayPal.me eller Buy Me a Coffee)
    Skriv linkene mellem anførselstegnene og gem.
 
@@ -18,8 +18,8 @@ Mappen indeholder hele hjemmesiden:
    c) Settings -> Pages -> Branch: main -> Save.
       Siden ligger så på https://DIT-NAVN.github.io/four-tracker/
    d) Installationsfilen: "Releases" -> "Create a new release" -> træk
-      FourTracker-Setup-0.1.0-share.exe ind -> Publish.
+      FourTracker-Setup-0.5.0-share-fx.exe ind -> Publish.
       Download-linket bliver så:
-      https://github.com/DIT-NAVN/four-tracker/releases/latest/download/FourTracker-Setup-0.1.0-share.exe
+      https://github.com/DIT-NAVN/four-tracker/releases/latest/download/FourTracker-Setup-0.5.0-share-fx.exe
 
 Del KUN share-installeren (uden VST2).

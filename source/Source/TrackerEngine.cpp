@@ -23,6 +23,36 @@ void TrackerEngine::prepare (double sampleRate, int maxBlockSize)
     smoothCoeff = (float) (1.0 - std::exp (-1.0 / (0.0015 * sr)));
     fadeStep    = (float) (1.0 / (0.004 * sr));
     monoScratch.assign (16384, 0.0f);
+
+    // SYNTH 2 FX: up to 2.5 s of delay and 50 ms of chorus per channel
+    s2tmpL.assign ((size_t) chanScratchSize, 0.0f);
+    s2tmpR.assign ((size_t) chanScratchSize, 0.0f);
+    for (auto& fx : s2fx)
+    {
+        fx.dl.assign ((size_t) (sr * 2.5) + 2, 0.0f);
+        fx.dr.assign (fx.dl.size(), 0.0f);
+        fx.cl.assign ((size_t) (sr * 0.05) + 4, 0.0f);
+        fx.cr.assign (fx.cl.size(), 0.0f);
+        fx.reverb.setSampleRate (sr);
+        fx.clear();
+    }
+}
+
+void TrackerEngine::Synth2Fx::clear()
+{
+    std::fill (dl.begin(), dl.end(), 0.0f);
+    std::fill (dr.begin(), dr.end(), 0.0f);
+    std::fill (cl.begin(), cl.end(), 0.0f);
+    std::fill (cr.begin(), cr.end(), 0.0f);
+    dw = cw = 0;
+    dampL = dampR = 0.0f;
+    reverb.reset();
+    tail = 0;
+}
+
+double TrackerEngine::rowSeconds() const noexcept
+{
+    return juce::jmax (1, speed.load()) * samplesPerTick() / sr;
 }
 
 // ===========================================================================
@@ -49,42 +79,69 @@ void TrackerEngine::handleCommand (const Cmd& c)
         case Cmd::SelectPattern:  selectPattern (c.a); break;
 
         case Cmd::Preview:
-        {
-            const int inst = c.a;
-            if (inst <= 0 || inst > kAuditionSlot) break;
-            auto snap = audioSnapshots[(size_t) inst];
-            if (snap == nullptr) break;
-
-            if (previewVoice.active) fadeOutVoice (previewVoice);   // quick declick
-            auto& v = previewVoice;
-            v.inst = snap;
-            v.slot = inst;
-            v.loopOnly = c.c != 0;
-            v.pos = v.loopOnly && snap->looping ? (double) snap->vLoopStart : 0.0;
-            v.inLoop = v.loopOnly;
-            v.dir = 1;
-            v.active = true;
-            v.fading = false;
-            v.fade = 1.0f;
-            startEnvelope (v);
-
-            midiNoteOff (previewMidiNote, previewMidiChan);
-            if (snap->p.midi)
-            {
-                previewMidiChan = snap->p.midiChannel;
-                previewMidiNote = juce::jlimit (0, 127, c.b - 1 + 12 + snap->p.transpose);
-                midiNoteOn (previewMidiNote, previewMidiChan, juce::jlimit (1, 127, snap->p.volume * 127 / 64), snap->p.midiProgram);
-            }
-
-            const double p = ((c.b - 1 + snap->p.transpose) * 64.0) + snap->p.fineTune / 2.0;
-            v.step = std::pow (2.0, (p - (kNativeNote - 1) * 64.0) / 768.0) * snap->data->sampleRate / sr;
-            const float g = 0.8f * (float) snap->p.volume / 64.0f;
-            v.gainL = v.gainR = v.targetL = v.targetR = g;
+            startPreviewVoice (previewVoice, c.a, c.b, c.c != 0, previewMidiNote, previewMidiChan, -1);
             break;
-        }
+
+        case Cmd::JamOn:
+            if (juce::isPositiveAndBelow (c.c, kNumChannels))
+                startPreviewVoice (jamVoices[(size_t) c.c], c.a, c.b, false, jamMidiNote[(size_t) c.c], jamMidiChan[(size_t) c.c], c.c);
+            break;
+
+        case Cmd::JamOff:
+            if (juce::isPositiveAndBelow (c.a, kNumChannels))
+            {
+                fadeOutVoice (jamVoices[(size_t) c.a]);
+                midiNoteOff (jamMidiNote[(size_t) c.a], jamMidiChan[(size_t) c.a]);
+            }
+            break;
 
         case Cmd::StopPreview:    fadeOutVoice (previewVoice); midiNoteOff (previewMidiNote, previewMidiChan); break;
     }
+}
+
+void TrackerEngine::startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel)
+{
+    if (inst <= 0 || inst > kAuditionSlot) return;
+    auto snap = audioSnapshots[(size_t) inst];
+    if (snap == nullptr) return;
+
+    if (v.active) fadeOutVoice (v);   // quick declick
+    v.inst = snap;
+    v.slot = inst;
+    v.loopOnly = loopOnly;
+    v.pos = v.loopOnly && snap->looping ? (double) snap->vLoopStart : 0.0;
+    v.inLoop = v.loopOnly;
+    v.dir = 1;
+    v.active = true;
+    v.fading = false;
+    v.fade = 1.0f;
+    startEnvelope (v);
+
+    const bool silenced = channel >= 0 && isChannelSilenced (channel);
+    midiNoteOff (midiNote, midiChan);
+    if (snap->p.midi && ! silenced)
+    {
+        midiChan = snap->p.midiChannel;
+        midiNote = juce::jlimit (0, 127, note - 1 + 12 + snap->p.transpose + (channel >= 0 ? mix[channel].pitch.load() : 0));
+        int vel = snap->p.volume * 127 / 64;
+        if (channel >= 0) vel = vel * mix[channel].volume.load() / 64;
+        midiNoteOn (midiNote, midiChan, juce::jlimit (1, 127, vel), snap->p.midiProgram);
+    }
+
+    const double p = ((note - 1 + snap->p.transpose + (channel >= 0 ? mix[channel].pitch.load() : 0)) * 64.0) + snap->p.fineTune / 2.0;
+    v.step = std::pow (2.0, (p - (kNativeNote - 1) * 64.0) / 768.0) * snap->data->sampleRate / sr;
+    float g = 0.8f * (float) snap->p.volume / 64.0f;
+    float gl = g, gr = g;
+    if (channel >= 0)
+    {
+        // a CHORD note follows its track's VOL, PAN and MUTE / SOLO
+        g *= silenced ? 0.0f : (float) mix[channel].volume.load() / 64.0f;
+        const float pan = (float) juce::jlimit (0, 255, 128 + mix[channel].pan.load() * 2) / 255.0f;
+        gl = g * (pan <= 0.5f ? 1.0f : 2.0f * (1.0f - pan));
+        gr = g * (pan >= 0.5f ? 1.0f : 2.0f * pan);
+    }
+    v.gainL = v.targetL = gl;
+    v.gainR = v.targetR = gr;
 }
 
 void TrackerEngine::handleMidi (const juce::MidiMessage& m)
@@ -193,6 +250,7 @@ void TrackerEngine::resetChannels (bool keepVoices)
 
 void TrackerEngine::startPlayback()
 {
+    lfoClock = 0.0;     // SYNTH 2's tempo LFO starts with the pattern
     int p = selectedPattern.load();
     const int q = queuedPattern.exchange (-1);
     if (q >= 0) p = q;
@@ -686,10 +744,13 @@ void TrackerEngine::startEnvelope (Voice& v)
     v.fL1 = v.fL2 = v.fR1 = v.fR2 = 0.0f;
     v.fCut = -1.0f;
     v.relStep = 0.0f;
-    if (v.inst != nullptr && v.inst->p.synth)
+    if (v.inst != nullptr && (v.inst->p.synth || v.inst->p.synth2))
     {
         v.envStage = 1;
         v.env = 0.0f;
+        v.fenv = 1.0f;
+        v.ph1 = 0.0;
+        v.ph2 = 0.37;          // a little apart, so two detuned saws don't start in phase
     }
     else
     {
@@ -729,10 +790,12 @@ void TrackerEngine::fadeOutVoice (Voice& v)
 {
     if (! v.active) return;
     // a synth note goes into its release; anything else fades out in 4 ms
-    if (v.envStage > 0 && v.envStage < 4 && v.inst != nullptr && v.inst->p.release > 0 && ! v.fading)
+    const double relMs = v.inst == nullptr ? 0.0
+                       : v.inst->p.synth2 ? synth2::envMs (v.inst->p.s2[s2Release]) : (double) v.inst->p.release;
+    if (v.envStage > 0 && v.envStage < 4 && relMs >= 1.0 && ! v.fading)
     {
         v.envStage = 4;
-        v.relStep = v.env / (float) juce::jmax (1.0, v.inst->p.release * 0.001 * sr);
+        v.relStep = v.env / (float) juce::jmax (1.0, relMs * 0.001 * sr);
         return;
     }
     v.fading = true;
@@ -812,6 +875,8 @@ void TrackerEngine::renderVoice (Voice& v, float* L, float* R, int numSamples, f
     if (v.slot > 0 && v.slot <= kAuditionSlot)
         if (const auto& now = audioSnapshots[(size_t) v.slot]; now != nullptr && now->data == s.data)
             lp = &now->p;
+
+    if (lp->synth2) { renderSynth2 (v, *lp, L, R, numSamples, peak, channel); return; }
 
     // synth envelope
     const bool synth = v.envStage > 0;
@@ -942,6 +1007,278 @@ void TrackerEngine::renderVoice (Voice& v, float* L, float* R, int numSamples, f
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// SYNTH 2
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    inline float polyBlep (double t, double dt) noexcept
+    {
+        if (t < dt)       { t /= dt; return (float) (t + t - t * t - 1.0); }
+        if (t > 1.0 - dt) { t = (t - 1.0) / dt; return (float) (t * t + t + t + 1.0); }
+        return 0.0f;
+    }
+
+    inline float oscillator (int wave, double t, double dt, float pw, juce::uint32& noise) noexcept
+    {
+        switch (wave)
+        {
+            case 0:                                                                                       // saw
+            {
+                // PW on a saw: a second saw, shifted by up to 45 % of a cycle, is added
+                // (50 % = a plain saw; less = a hollower, phasing saw that PWM makes move)
+                float y = (float) (2.0 * t - 1.0) - polyBlep (t, dt);
+                const double off = 0.5 - pw;
+                if (off > 0.001)
+                {
+                    const double t2 = std::fmod (t + off, 1.0);
+                    y = 0.5f * (y + (float) (2.0 * t2 - 1.0) - polyBlep (t2, dt)) * (1.0f + (float) off);
+                }
+                return y;
+            }
+            case 1:                                                                                       // pulse
+            {
+                float y = t < pw ? 1.0f : -1.0f;
+                y += polyBlep (t, dt);
+                y -= polyBlep (std::fmod (t + 1.0 - pw, 1.0), dt);
+                return y * 0.8f;
+            }
+            case 2:                                                                                       // triangle
+            {
+                // PW skews the peak: 50 % = triangle, 5 % = almost a falling saw
+                const double q = (double) pw;
+                return (float) (t < q ? 2.0 * t / q - 1.0 : 1.0 - 2.0 * (t - q) / (1.0 - q));
+            }
+            case 3:                                                                                       // sine
+            {
+                // PW = phase distortion (CZ style): 50 % = a pure sine, lower = brighter, more saw-like
+                const double q = (double) pw;
+                const double w = t < q ? 0.5 * t / q : 0.5 + 0.5 * (t - q) / (1.0 - q);
+                return (float) std::sin (w * juce::MathConstants<double>::twoPi);
+            }
+            default:                                                                                      // noise
+                noise = noise * 1664525u + 1013904223u;
+                return (float) ((int) (noise >> 9) - 4194304) / 4194304.0f * 0.7f;
+        }
+    }
+
+    inline float lfoShape (int shape, double ph) noexcept   // -1..1
+    {
+        switch (shape)
+        {
+            case 1:  return (float) (ph < 0.5 ? 4.0 * ph - 1.0 : 3.0 - 4.0 * ph);
+            case 2:  return (float) (1.0 - 2.0 * ph);
+            case 3:  return ph < 0.5 ? 1.0f : -1.0f;
+            default: return (float) std::sin (ph * juce::MathConstants<double>::twoPi);
+        }
+    }
+}
+
+void TrackerEngine::renderSynth2 (Voice& v, const InstrumentParams& p, float* L, float* R, int numSamples, float& peak, int channel)
+{
+    const auto& k = p.s2;
+    const auto kv = [&k] (int i) { return k[(size_t) i]; };
+
+    // envelopes
+    const float atkStep = 1.0f / (float) juce::jmax (1.0, synth2::envMs (kv (s2Attack)) * 0.001 * sr);
+    const float susLvl  = (float) kv (s2Sustain) / 127.0f;
+    const float decStep = juce::jmax (0.0f, 1.0f - susLvl) / (float) juce::jmax (1.0, synth2::envMs (kv (s2Decay)) * 0.001 * sr);
+    const float fdecay  = (float) std::exp (-1.0 / (synth2::filterDecayMs (kv (s2FDecay)) * 0.001 * sr));
+
+    // oscillators: the voice's speed through the 128-frame cycle is the pitch
+    const double inc = v.step / 128.0;
+    const double semi2 = (kv (s2Osc2Semi) - 24) + (kv (s2Osc2Fine) - 64) / 63.0 * 0.5;
+    const double ratio2 = std::pow (2.0, semi2 / 12.0);
+    const float mix = (float) kv (s2OscMix) / 127.0f;
+    const float pwBase = 0.5f - 0.45f * (float) kv (s2Osc1PW) / 127.0f;
+    const int w1 = kv (s2Osc1Wave), w2 = kv (s2Osc2Wave);
+
+    // LFO: free in Hz, or a length in rows (1/16 ... two patterns) at the current tempo
+    const int patRows = getPattern (juce::jlimit (0, kMaxPatterns - 1, playPattern.load())).getNumRows();
+    const double syncRows = synth2::lfoSyncRows (kv (s2LfoSync), patRows);
+    const double period = syncRows > 0.0 ? syncRows * rowSeconds() : 1.0 / synth2::lfoHz (kv (s2LfoRate));
+    const double lpx = kv (s2LfoPitch) / 127.0;
+    const float lfoPitchSemis = (float) (12.0 * lpx * lpx);
+    const float lfoPwm = 0.4f * (float) kv (s2LfoPwm) / 127.0f;
+    const float lfoFilter = 64.0f * (float) kv (s2LfoFilter) / 127.0f;
+
+    // filter: the knobs, or the channel's 0X / 0Z commands
+    float cutBase = (float) kv (s2Cutoff), reso = (float) kv (s2Reso);
+    int accentVal = 0, distVal = 0;
+    if (juce::isPositiveAndBelow (channel, kNumChannels))
+    {
+        const auto& c = chans[channel];
+        if (c.fxCutoff >= 0) cutBase = (float) c.fxCutoff;
+        if (c.fxReso >= 0)   reso = (float) c.fxReso;
+        if (c.fxAccent >= 0) accentVal = c.fxAccent;
+        if (c.fxDrive >= 0)  distVal = c.fxDrive;
+    }
+    const float envAmt = 80.0f * (float) kv (s2EnvAmt) / 127.0f;
+    const float accentAmt = (float) accentVal / 64.0f;
+    const float accentDecay = (float) std::exp (-1.0 / (0.15 * sr));
+    const float drive = distVal > 0 ? 1.0f + (float) distVal / 64.0f * 24.0f : 0.0f;
+    const float driveNorm = drive > 0.0f ? 0.8f / std::tanh (drive * 0.8f) : 1.0f;
+
+    float fa1 = 0, fa2 = 0, fa3 = 0, pitchMul = 1.0f, pw = pwBase;
+    auto control = [&] (int i)
+    {
+        double ph = std::fmod ((lfoNow + i / sr) / period, 1.0);
+        if (ph < 0.0) ph += 1.0;
+        const float lfo = lfoShape (kv (s2LfoShape), ph);
+        pitchMul = lfoPitchSemis > 0.0f ? std::pow (2.0f, lfoPitchSemis * lfo / 12.0f) : 1.0f;
+        pw = juce::jlimit (0.05f, 0.95f, pwBase + lfoPwm * lfo);
+        const float target = juce::jlimit (0.0f, 127.0f, cutBase + envAmt * v.fenv + lfoFilter * lfo + accentAmt * v.accentEnv * 60.0f);
+        if (v.fCut < 0.0f) v.fCut = target;
+        v.fCut += (target - v.fCut) * 0.5f;
+        const double fc = juce::jmin (synth2::cutoffHz (v.fCut), sr * 0.45);
+        const double g = std::tan (juce::MathConstants<double>::pi * fc / sr);
+        const float kq = (float) (2.0 - 1.96 * reso / 127.0);
+        fa1 = (float) (1.0 / (1.0 + g * (g + kq)));
+        fa2 = (float) g * fa1;
+        fa3 = (float) g * fa2;
+    };
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if ((i & 15) == 0) control (i);
+        v.gainL += (v.targetL - v.gainL) * smoothCoeff;
+        v.gainR += (v.targetR - v.gainR) * smoothCoeff;
+
+        float g = 1.0f;
+        if (v.fading)
+        {
+            v.fade -= fadeStep;
+            if (v.fade <= 0.0f) { v.active = false; break; }
+            g = v.fade;
+        }
+        switch (v.envStage)
+        {
+            case 1:  v.env += atkStep; if (v.env >= 1.0f) { v.env = 1.0f; v.envStage = 2; } break;
+            case 2:  v.env -= decStep; if (v.env <= susLvl) { v.env = susLvl; v.envStage = 3; } break;
+            case 3:  v.env += (susLvl - v.env) * 0.002f; if (susLvl <= 0.0f && v.env < 0.0005f) v.env = 0.0f; break;
+            case 4:  v.env -= v.relStep; break;
+            default: break;
+        }
+        if (v.env <= 0.0f && v.envStage >= 3) { v.active = false; break; }
+        g *= v.env;
+        if (accentAmt > 0.0f) g *= 1.0f + 0.7f * accentAmt * v.accentEnv;
+        v.accentEnv *= accentDecay;
+        v.fenv *= fdecay;
+
+        const double d1 = inc * pitchMul, d2 = d1 * ratio2;
+        const float o1 = oscillator (w1, v.ph1, d1, pw, v.noise);
+        const float o2 = oscillator (w2, v.ph2, d2, pw, v.noise);
+        float x = ((1.0f - mix) * o1 + mix * o2) * 0.5f;
+
+        // TPT state-variable low-pass
+        {
+            const float v3 = x - v.fL2;
+            const float v1 = fa1 * v.fL1 + fa2 * v3;
+            const float v2 = v.fL2 + fa2 * v.fL1 + fa3 * v3;
+            v.fL1 = 2.0f * v1 - v.fL1;
+            v.fL2 = 2.0f * v2 - v.fL2;
+            x = v2;
+        }
+        if (drive > 0.0f) x = std::tanh (x * drive) * driveNorm;
+
+        const float outL = x * v.gainL * g, outR = x * v.gainR * g;
+        L[i] += outL;
+        R[i] += outR;
+        peak = juce::jmax (peak, std::abs (outL), std::abs (outR));
+
+        v.ph1 += d1; if (v.ph1 >= 1.0) v.ph1 -= std::floor (v.ph1);
+        v.ph2 += d2; if (v.ph2 >= 1.0) v.ph2 -= std::floor (v.ph2);
+    }
+}
+
+void TrackerEngine::processSynth2Fx (int ch, float* L, float* R, int n)
+{
+    auto& fx = s2fx[(size_t) ch];
+    if (fx.dl.empty() || fx.cl.empty()) return;
+
+    // is anything coming in? then keep the FX running for a while after it stops
+    float in = 0.0f;
+    for (int i = 0; i < n; ++i) in = juce::jmax (in, std::abs (L[i]), std::abs (R[i]));
+    if (in > 1.0e-6f) fx.tail = (int) (sr * 10.0);
+    else if (fx.tail <= 0) return;
+    fx.tail -= n;
+
+    const InstrumentSnapshot* snap = fx.slot > 0 && fx.slot < (int) audioSnapshots.size() ? audioSnapshots[(size_t) fx.slot].get() : nullptr;
+    if (snap == nullptr || ! snap->p.synth2) return;
+    const auto& k = snap->p.s2;
+
+    // chorus: two modulated taps, one per side
+    const float cho = (float) k[s2Chorus] / 127.0f;
+    const int csz = (int) fx.cl.size();
+    const double base = 0.012 * sr, depth = 0.004 * sr, cinc = juce::MathConstants<double>::twoPi * 0.45 / sr;
+    // delay: tempo-synced, ping-pong
+    const float dmix = (float) k[s2DelayMix] / 127.0f;
+    const float fb = 0.85f * (float) k[s2DelayFb] / 127.0f;
+    const int dsz = (int) fx.dl.size();
+    const int dlen = juce::jlimit (1, dsz - 1, (int) (synth2::delayRows (k[s2DelayTime]) * rowSeconds() * sr));
+
+    for (int i = 0; i < n; ++i)
+    {
+        float xl = L[i], xr = R[i];
+
+        fx.cl[(size_t) fx.cw] = xl;
+        fx.cr[(size_t) fx.cw] = xr;
+        if (cho > 0.0f)
+        {
+            auto tap = [&] (const std::vector<float>& b, double d)
+            {
+                double rp = fx.cw - d;
+                while (rp < 0.0) rp += csz;
+                const int i0 = (int) rp;
+                const float fr = (float) (rp - i0);
+                return b[(size_t) i0] * (1.0f - fr) + b[(size_t) ((i0 + 1) % csz)] * fr;
+            };
+            const float tl = tap (fx.cl, base + depth * std::sin (fx.cph));
+            const float tr = tap (fx.cr, base + depth * std::sin (fx.cph + juce::MathConstants<double>::halfPi));
+            xl = xl * (1.0f - 0.45f * cho) + tl * 0.75f * cho;
+            xr = xr * (1.0f - 0.45f * cho) + tr * 0.75f * cho;
+        }
+        fx.cph += cinc;
+        if (fx.cph > juce::MathConstants<double>::twoPi) fx.cph -= juce::MathConstants<double>::twoPi;
+        if (++fx.cw >= csz) fx.cw = 0;
+
+        int rd = fx.dw - dlen;
+        if (rd < 0) rd += dsz;
+        const float el = fx.dl[(size_t) rd], er = fx.dr[(size_t) rd];
+        fx.dampL += (el - fx.dampL) * 0.35f;     // a little darker on each repeat
+        fx.dampR += (er - fx.dampR) * 0.35f;
+        fx.dl[(size_t) fx.dw] = xl + fx.dampR * fb;   // ping-pong: each side feeds the other
+        fx.dr[(size_t) fx.dw] = xr * 0.3f + fx.dampL * fb;
+        if (++fx.dw >= dsz) fx.dw = 0;
+        if (dmix > 0.0f) { xl += el * dmix; xr += er * dmix; }
+
+        L[i] = xl;
+        R[i] = xr;
+    }
+
+    const int rsz = k[s2ReverbSize], rmx = k[s2ReverbMix];
+    if (rmx > 0)
+    {
+        if (rsz != fx.revSize || rmx != fx.revMix)
+        {
+            juce::Reverb::Parameters rp;
+            rp.roomSize = 0.4f + 0.58f * (float) rsz / 127.0f;
+            rp.damping = 0.45f;
+            rp.wetLevel = 0.5f * (float) rmx / 127.0f;
+            rp.dryLevel = 1.0f;
+            rp.width = 1.0f;
+            fx.reverb.setParameters (rp);
+            fx.revSize = rsz;
+            fx.revMix = rmx;
+        }
+        fx.reverb.processStereo (L, R, n);
+    }
+
+    if (fx.tail <= 0) fx.clear();   // quiet for 10 s: start clean next time
+}
+
 void TrackerEngine::renderVoices (float* L, float* R, int offset, int numSamples)
 {
     for (int ch = 0; ch < kNumChannels; ++ch)
@@ -949,14 +1286,51 @@ void TrackerEngine::renderVoices (float* L, float* R, int offset, int numSamples
         float peak = 0.0f;
         float* cl = useChannelBuffers ? chanL (ch) + offset : L + offset;
         float* cr = useChannelBuffers ? chanR (ch) + offset : R + offset;
-        renderVoice (chans[ch].voice, cl, cr, numSamples, peak, ch);
-        renderVoice (chans[ch].ghost, cl, cr, numSamples, peak, ch);
+        auto& cs = chans[ch];
+        renderWithSynth2Fx ({ &cs.voice, &cs.ghost, &jamVoices[(size_t) ch] }, ch, cl, cr, numSamples, peak, ch);
         const int lvl = juce::jmin (1000, (int) (peak * 1000.0f));
         if (lvl > channelLevel[ch].load()) channelLevel[ch] = lvl;
     }
 
+    // the preview / jam voice (computer keys, clicking a slot) has its own SYNTH 2 FX
     float dummy = 0.0f;
-    renderVoice (previewVoice, L + offset, R + offset, numSamples, dummy);
+    renderWithSynth2Fx ({ &previewVoice }, kNumChannels, L + offset, R + offset, numSamples, dummy, -1);
+}
+
+void TrackerEngine::renderWithSynth2Fx (std::initializer_list<Voice*> voices, int fxIndex, float* L, float* R, int numSamples, float& peak, int channel)
+{
+    auto isS2 = [] (const Voice& v) { return v.active && v.inst != nullptr && v.inst->p.synth2; };
+    auto& fx = s2fx[(size_t) fxIndex];
+    bool s2 = false;
+    for (auto* v : voices)
+        if (isS2 (*v)) { if (! s2) fx.slot = v->slot; s2 = true; }
+
+    if (! s2 && fx.tail <= 0)
+    {
+        lfoNow = lfoClock;
+        for (auto* v : voices) renderVoice (*v, L, R, numSamples, peak, channel);
+        return;
+    }
+
+    // SYNTH 2 voices go through the chorus / delay / reverb first; the tail rings on after the note
+    const int chunk = juce::jmax (1, (int) s2tmpL.size());
+    for (int done = 0; done < numSamples; done += chunk)
+    {
+        const int len = juce::jmin (chunk, numSamples - done);
+        float* tl = s2tmpL.data();
+        float* tr = s2tmpR.data();
+        juce::FloatVectorOperations::clear (tl, len);
+        juce::FloatVectorOperations::clear (tr, len);
+        lfoNow = lfoClock + done / sr;
+        for (auto* v : voices)
+        {
+            if (isS2 (*v)) renderVoice (*v, tl, tr, len, peak, channel);
+            else           renderVoice (*v, L + done, R + done, len, peak, channel);
+        }
+        processSynth2Fx (fxIndex, tl, tr, len);
+        juce::FloatVectorOperations::add (L + done, tl, len);
+        juce::FloatVectorOperations::add (R + done, tr, len);
+    }
 }
 
 void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, double hostBpm)
@@ -1017,6 +1391,7 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
                 len = juce::jmin (len, juce::jmax (1, (int) std::ceil (samplesToNextTick)));
 
             renderVoices (L, R, from, len);
+            lfoClock += len / sr;
 
             if (playing) samplesToNextTick -= len;
             from += len;

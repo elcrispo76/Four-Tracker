@@ -6,6 +6,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "TrackerTypes.h"
+#include "Synth2.h"
 #include <array>
 
 namespace ft
@@ -54,6 +55,12 @@ struct InstrumentParams
     // MIDI LEARN for the synth's 8 sliders (SynthParam order): the MIDI CC number
     // (0..119) of the knob that moves it, -1 = none. One knob moves one slider only.
     std::array<int, 8> cc { -1, -1, -1, -1, -1, -1, -1, -1 };
+
+    // SYNTH 2 (synth2 == true): two oscillators, filter + envelope, LFO and FX, all knobs
+    bool synth2 = false;
+    Synth2Values s2 = synth2::defaults();
+    std::array<int, s2NumParams> cc2 = makeNoKnobs();   // MIDI LEARN for the knobs, -1 = none
+    static std::array<int, s2NumParams> makeNoKnobs() { std::array<int, s2NumParams> a; a.fill (-1); return a; }
 
     // MIDI instrument (midi == true): notes are sent to MIDI out instead of played
     bool midi        = false;
@@ -127,6 +134,10 @@ struct Instrument
         volume, tuning and envelope if it already was a synth. */
     void makeSynth (int wave);
     bool isSynth() const noexcept { return ! isEmpty() && params.synth; }
+    /** SYNTH 2. Keeps the knobs (and its MIDI knobs) if it already was one. */
+    void makeSynth2();
+    void applySynth2Patch (const synth2::Patch&);
+    bool isSynth2() const noexcept { return ! isEmpty() && params.synth2; }
 
     /** Turns this slot into a MIDI instrument: its notes go to MIDI out (a device, or the DAW). */
     void makeMidi();

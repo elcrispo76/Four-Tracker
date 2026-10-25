@@ -149,6 +149,41 @@ private:
     bool learn = false;
 };
 
+/** A round knob: a plain disc with a line, the name above and the value under it.
+    Drag up/down (Shift = fine), mouse wheel, double-click = default, right-click = onRightClick. */
+class PixelKnob : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    PixelKnob (const juce::String& label, int maxValue, int defaultValue);
+
+    void setValue (int v, bool notify = false);
+    int  getValue() const noexcept { return value; }
+    void setRange (int maxValue, int defaultValue) { maxV = maxValue; defV = defaultValue; setValue (value); repaint(); }
+    void setBadge (const juce::String& text, bool learning)
+    {
+        if (text == badge && learning == learn) return;
+        badge = text; learn = learning; repaint();
+    }
+
+    std::function<juce::String (int)> formatter;
+    std::function<void (int)> onChange;
+    std::function<void()> onRightClick;
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    juce::String label, badge;
+    int maxV, value, defV;
+    bool learn = false;
+    float dragStartY = 0.0f;
+    int dragStartValue = 0;
+    float wheelAcc = 0.0f;
+};
+
 class ValueBox : public juce::Component, private juce::TextEditor::Listener
 {
 public:

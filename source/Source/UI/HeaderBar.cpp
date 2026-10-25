@@ -77,7 +77,7 @@ void TitleBar::mouseDown (const MouseEvent& e)
 HeaderControls::HeaderControls (EditorState& s) : st (s)
 {
     for (auto* c : std::initializer_list<Component*> { &patternBox, &patPrev, &patNext, &instBox, &instPrev, &instNext,
-                                                        &instName, &loop, &speedBox, &bpmBox, &octaveBox, &spacingBox, &editBtn, &hexBtn, &decBtn })
+                                                        &instName, &loop, &speedBox, &bpmBox, &octaveBox, &spacingBox, &editBtn, &chordBtn, &hexBtn, &decBtn })
         addAndMakeVisible (c);
 
     auto hexFmt = [this] (int v) { return formatNumber (v, 2, st.hex()); };
@@ -118,6 +118,14 @@ HeaderControls::HeaderControls (EditorState& s) : st (s)
 
     editBtn.onClick = [this] { st.setEditMode (! st.editMode); };
     editBtn.setTooltip ("Edit mode (Space): when lit, note keys write into the pattern");
+    chordBtn.onClick = [this]
+    {
+        st.proc.chordMode = ! st.proc.chordMode;
+        st.setStatus (st.proc.chordMode ? "CHORD ON - HOLD SEVERAL KEYS: ONE NOTE PER TRACK, FROM THE CURSOR TO THE RIGHT" : "CHORD OFF");
+        st.changed();
+    };
+    chordBtn.setTooltip ("Chord: hold several note keys and each goes to its own track (cursor track, then the next ones)");
+    for (auto* b : { &editBtn, &chordBtn }) { b->setWantsKeyboardFocus (false); b->setMouseClickGrabsKeyboardFocus (false); }
 
     hexBtn.onClick = [this] { st.proc.hexMode = true;  st.changed(); };
     decBtn.onClick = [this] { st.proc.hexMode = false; st.changed(); };
@@ -146,6 +154,7 @@ void HeaderControls::refresh()
     octaveBox.setValue (st.octave);
     spacingBox.setValue (st.editStep);
     editBtn.setToggleState (st.editMode, dontSendNotification);
+    chordBtn.setToggleState (st.proc.chordMode, dontSendNotification);
     hexBtn.setToggleState (st.hex(), dontSendNotification);
     decBtn.setToggleState (! st.hex(), dontSendNotification);
     patternBox.repaint();
@@ -198,7 +207,8 @@ void HeaderControls::resized()
     bpmBox.setBounds (bpmPanel.getX() + 12, 36, 100, 54);
     octaveBox.setBounds (octavePanel.getX() + 12, 36, 80, 54);
     spacingBox.setBounds (spacingPanel.getX() + 12, 36, 80, 54);
-    editBtn.setBounds (editPanel.getX() + 10, 10, 84, 86);
+    editBtn.setBounds (editPanel.getX() + 10, 8, 84, 56);
+    chordBtn.setBounds (editPanel.getX() + 10, 68, 84, 30);
 
     hexBtn.setBounds (hexPanel.getX() + 8, 10, 76, 42);
     decBtn.setBounds (hexPanel.getX() + 8, 56, 76, 40);

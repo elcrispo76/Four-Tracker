@@ -39,6 +39,10 @@ public:
     void requestPattern (int p)               { push ({ Cmd::SelectPattern, p }); }
     void requestPreview (int inst, int note, bool loopOnly = false) { push ({ Cmd::Preview, inst, note, loopOnly ? 1 : 0 }); }
     void requestStopPreview()                 { push ({ Cmd::StopPreview }); }
+    /** CHORD: plays one held note on a track of its own (samples, synths and MIDI instruments).
+        It goes through that track's VOL / PAN / MUTE and its effects, but leaves the pattern alone. */
+    void requestJam (int inst, int note, int channel) { push ({ Cmd::JamOn, inst, note, channel }); }
+    void requestJamOff (int channel)                  { push ({ Cmd::JamOff, channel }); }
 
     /** Sample browser: plays a file that is not loaded into any slot.
         publishAudition() hands the sound over (message thread), then
@@ -119,7 +123,7 @@ private:
     // ---- command queue ------------------------------------------------------
     struct Cmd
     {
-        enum Type { StartStop, Start, Stop, SelectPattern, Preview, StopPreview } type;
+        enum Type { StartStop, Start, Stop, SelectPattern, Preview, StopPreview, JamOn, JamOff } type;
         int a = 0, b = 0, c = 0;
     };
     void push (Cmd c);
@@ -152,7 +156,37 @@ private:
         float env = 1.0f, relStep = 0.0f;
         float accentEnv = 0.0f;              // 1 at the note start, fades out (ACCENT)
         float fL1 = 0, fL2 = 0, fR1 = 0, fR2 = 0;   // filter state
+
+        // SYNTH 2: oscillator phases (cycles), filter envelope, noise
+        double ph1 = 0.0, ph2 = 0.0;
+        float fenv = 0.0f;
+        juce::uint32 noise = 0x1234567u;
     };
+    void renderSynth2 (Voice& v, const InstrumentParams& p, float* L, float* R, int numSamples, float& peak, int channel);
+
+    // SYNTH 2's chorus / delay / reverb, one set per channel (tails keep ringing after the note)
+    struct Synth2Fx
+    {
+        std::vector<float> dl, dr;          // delay lines
+        int dw = 0;
+        float dampL = 0.0f, dampR = 0.0f;
+        std::vector<float> cl, cr;          // chorus lines
+        int cw = 0;
+        double cph = 0.0;
+        juce::Reverb reverb;
+        int revSize = -1, revMix = -1;
+        int slot = 0;                       // the SYNTH 2 instrument whose FX settings are used
+        int tail = 0;                       // samples left to run after the last note
+        void clear();
+    };
+    std::array<Synth2Fx, kNumChannels + 1> s2fx;   // one per channel + one for the preview / jam voice
+    std::vector<float> s2tmpL, s2tmpR;
+    double lfoClock = 0.0;                  // seconds since play started: SYNTH 2's LFO follows it
+    double lfoNow = 0.0;                    // lfoClock at the start of the samples being rendered
+    void processSynth2Fx (int ch, float* L, float* R, int numSamples);
+    /** Renders the voices; SYNTH 2 voices go through FX set `fxIndex` first. */
+    void renderWithSynth2Fx (std::initializer_list<Voice*> voices, int fxIndex, float* L, float* R, int numSamples, float& peak, int channel);
+    double rowSeconds() const noexcept;
     void startEnvelope (Voice& v);
     struct ChannelState;
     void releaseChannel (ChannelState& cs);                    // note-off: fade the voice, end a MIDI note
@@ -234,6 +268,9 @@ private:
 
     ChannelState chans[kNumChannels];
     Voice previewVoice;
+    std::array<Voice, kNumChannels> jamVoices;          // CHORD notes, one per track
+    std::array<int, kNumChannels> jamMidiNote {}, jamMidiChan {};
+    void startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel);
 
     double sr = 44100.0;
     double samplesToNextTick = 0.0;

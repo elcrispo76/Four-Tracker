@@ -49,6 +49,7 @@ private:
     ValueBox octaveBox { 0, 7, 4, 30.0f };
     ValueBox spacingBox { 0, 32, 1, 26.0f };   // a little smaller so 2 digits fit next to the spinner   // rows the cursor moves after a note / with up-down
     PixelButton editBtn { "EDIT", PixelButton::Style::Record, 18.0f };
+    PixelButton chordBtn { "CHORD", PixelButton::Style::Record, 14.0f };   // held keys go to the next tracks
     PixelButton hexBtn { "HEX", PixelButton::Style::Segment, 17.0f }, decBtn { "DEC", PixelButton::Style::Segment, 17.0f };
 
     juce::Rectangle<int> patPanel, instPanel, loopPanel, speedPanel, bpmPanel, octavePanel, spacingPanel, editPanel, hexPanel;

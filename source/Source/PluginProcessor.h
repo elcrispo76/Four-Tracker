@@ -52,7 +52,9 @@ public:
     void instrumentChanged (int slot);
 
     // ---- synth MIDI LEARN: a knob on the MIDI keyboard moves one synth slider -------
-    /** The next knob moved becomes this slot's knob for that slider (ft::SynthParam). */
+    /** MIDI LEARN target for SYNTH 2's knob n: kSynth2Knob + n (SYNTH 1's sliders are 0..7). */
+    static constexpr int kSynth2Knob = 100;
+    /** The next knob moved becomes this slot's knob for that slider (ft::SynthParam) or SYNTH 2 knob. */
     void startSynthLearn (int slot, int param);
     void cancelSynthLearn();
     bool isSynthLearning (int slot, int param) const { return learnSlot == slot && learnParam == param; }
@@ -109,6 +111,7 @@ public:
 
     /** UI preferences kept with the session. */
     bool hexMode = true;
+    bool chordMode = false;   // CHORD: held note keys go to the next tracks
     int  selectedInstrument = 1;
 
 private:

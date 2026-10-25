@@ -584,7 +584,34 @@ InstrumentsPage::InstrumentsPage (EditorState& s) : st (s), list (s)
     for (auto* sp : { &loop, &pingPong, &reverse }) sp->onChange = [this] (bool) { push(); };
 
     // synth controls
-    for (auto* b : { &srcSample, &srcSynth, &srcMidi }) addAndMakeVisible (b);
+    for (auto* b : { &srcSample, &srcSynth, &srcSynth2, &srcMidi }) addAndMakeVisible (b);
+    srcSynth2.onClick = [this] { setSource (srcIsSynth2); };
+
+    // SYNTH 2: knobs, each with MIDI LEARN on right-click
+    for (int p = 0; p < s2NumParams; ++p)
+    {
+        auto k = std::make_unique<PixelKnob> (synth2::label (p), synth2::maxValue (p), synth2::defaultValue (p));
+        k->formatter = [p] (int v) { return synth2::format (p, v); };
+        k->onChange = [this, p] (int v)
+        {
+            auto& in = st.proc.getInstrument (slot());
+            if (! in.isSynth2()) return;
+            in.params.s2[(size_t) p] = v;
+            st.proc.instrumentChanged (slot());
+        };
+        k->onRightClick = [this, p] { showKnobMenu (FourTrackerProcessor::kSynth2Knob + p); };
+        k->setTooltip (String (synth2::name (p)) + " - drag up/down, double-click resets, right-click: MIDI LEARN");
+        addChildComponent (*k);
+        knobs[(size_t) p] = std::move (k);
+    }
+    patchPrev.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (12.0f, 18.0f), c, false); };
+    patchNext.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (12.0f, 18.0f), c, true); };
+    patchPrev.onClick = [this] { const int n = (int) patches.size(); if (n > 0) choosePatch ((currentPatchIndex() + n - 1) % n); };
+    patchNext.onClick = [this] { const int n = (int) patches.size(); if (n > 0) choosePatch ((currentPatchIndex() + 1) % n); };
+    patchList.onClick = [this] { showPatchMenu(); };
+    patchSave.onClick = [this] { savePatchDialog(); };
+    for (auto* b : { &patchPrev, &patchNext, &patchList, &patchSave }) addChildComponent (b);
+    refreshPatches();
     srcSample.onClick = [this] { setSource (srcIsSample); };
     srcSynth.onClick  = [this] { setSource (srcIsSynth); };
     srcMidi.onClick   = [this] { setSource (srcIsMidi); };
@@ -666,13 +693,22 @@ void InstrumentsPage::push()
 void InstrumentsPage::setSource (int source)
 {
     auto& in = st.proc.getInstrument (slot());
-    const int now = in.isMidi() ? srcIsMidi : in.isSynth() ? srcIsSynth : srcIsSample;
+    const int now = in.isMidi() ? srcIsMidi : in.isSynth() ? srcIsSynth : in.isSynth2() ? srcIsSynth2 : srcIsSample;
     if (source == now) { instrumentsChanged(); return; }
+
+    if (source == srcIsSynth2)
+    {
+        in.makeSynth2();
+        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW SYNTH 2 - PICK A PATCH, RIGHT-CLICK A KNOB FOR MIDI LEARN");
+        st.proc.instrumentChanged (slot());
+        st.changed();
+        return;
+    }
 
     if (source == srcIsSynth)
     {
         in.makeSynth (waveSine);
-        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW A SYNTH");
+        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW SYNTH 1");
     }
     else if (source == srcIsMidi)
     {
@@ -706,16 +742,20 @@ void InstrumentsPage::pushSynth()
 void InstrumentsPage::showKnobMenu (int param)
 {
     auto& in = st.proc.getInstrument (slot());
-    if (! in.isSynth()) return;
-    const int cc = in.params.cc[(size_t) param];
+    const bool isS2 = param >= FourTrackerProcessor::kSynth2Knob;
+    const int n = isS2 ? param - FourTrackerProcessor::kSynth2Knob : param;
+    if (isS2 ? ! in.isSynth2() : ! in.isSynth()) return;
+    const int cc = isS2 ? in.params.cc2[(size_t) n] : in.params.cc[(size_t) n];
     const bool learning = st.proc.isSynthLearning (slot(), param);
+    const String pname = isS2 ? String (synth2::name (n)) : String (synthParamName (n));
+    Component* target = isS2 ? (Component*) knobs[(size_t) n].get() : (Component*) synthSliders()[(size_t) n];
     PopupMenu m;
-    m.addSectionHeader (String (synthParamName (param)) + " - SLOT " + hex2 (slot()));
+    m.addSectionHeader (pname + " - SLOT " + hex2 (slot()));
     m.addItem (1, learning ? "WAITING FOR A KNOB ... (CLICK TO CANCEL)" : "MIDI LEARN: MOVE A KNOB ON YOUR MIDI KEYBOARD");
     if (cc >= 0) m.addItem (2, "FORGET KNOB CC " + String (cc));
     Component::SafePointer<InstrumentsPage> safe (this);
     const int s = slot();
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (synthSliders()[(size_t) param]), [safe, param, s, learning] (int chosen)
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (target), [safe, param, s, learning, pname] (int chosen)
     {
         if (safe == nullptr || chosen <= 0) return;
         auto& self = *safe;
@@ -727,12 +767,12 @@ void InstrumentsPage::showKnobMenu (int param)
         else if (chosen == 1)
         {
             self.st.proc.startSynthLearn (s, param);
-            self.st.setStatus ("MIDI LEARN: MOVE A KNOB FOR " + String (synthParamName (param)) + " OF SLOT " + hex2 (s));
+            self.st.setStatus ("MIDI LEARN: MOVE A KNOB FOR " + pname + " OF SLOT " + hex2 (s));
         }
         else if (chosen == 2)
         {
             self.st.proc.forgetSynthKnob (s, param);
-            self.st.setStatus (String (synthParamName (param)) + " OF SLOT " + hex2 (s) + " HAS NO KNOB NOW");
+            self.st.setStatus (pname + " OF SLOT " + hex2 (s) + " HAS NO KNOB NOW");
         }
         self.updateKnobBadges();
         self.st.changed();
@@ -748,19 +788,107 @@ void InstrumentsPage::updateKnobBadges()
         const int cc = in.params.cc[(size_t) p];
         synthSliders()[(size_t) p]->setBadge (learning ? String ("LEARN") : cc >= 0 ? "CC " + String (cc) : String(), learning);
     }
+    for (int p = 0; p < s2NumParams; ++p)
+    {
+        const bool learning = in.isSynth2() && st.proc.isSynthLearning (slot(), FourTrackerProcessor::kSynth2Knob + p);
+        const int cc = in.params.cc2[(size_t) p];
+        knobs[(size_t) p]->setBadge (learning ? String ("LEARN") : cc >= 0 ? "CC " + String (cc) : String(), learning);
+    }
+}
+
+// ---- SYNTH 2 patches -------------------------------------------------------------
+
+void InstrumentsPage::refreshPatches()
+{
+    patches = synth2::allPatches();
+}
+
+int InstrumentsPage::currentPatchIndex() const
+{
+    const auto& in = st.proc.getInstrument (slot());
+    for (size_t i = 0; i < patches.size(); ++i)
+        if (patches[i].name.equalsIgnoreCase (in.name)) return (int) i;
+    return -1;
+}
+
+void InstrumentsPage::choosePatch (int index)
+{
+    if (! isPositiveAndBelow (index, (int) patches.size())) return;
+    auto& in = st.proc.getInstrument (slot());
+    in.applySynth2Patch (patches[(size_t) index]);
+    st.proc.instrumentChanged (slot());
+    st.setStatus ("PATCH " + String (index + 1) + "/" + String ((int) patches.size()) + ": " + patches[(size_t) index].name);
+    instrumentsChanged();
+    previewOnce (st, slot(), this);
+    st.changed();
+}
+
+void InstrumentsPage::showPatchMenu()
+{
+    if (patches.empty()) refreshPatches();
+    PopupMenu m, trance, italo, eighties, user;
+    for (size_t i = 0; i < patches.size(); ++i)
+    {
+        const auto& p = patches[i];
+        const int id = (int) i + 1;
+        if (! p.factory)                       user.addItem (id, p.name);
+        else if (p.name.startsWith ("TRANCE")) trance.addItem (id, p.name);
+        else if (p.name.startsWith ("ITALO"))  italo.addItem (id, p.name);
+        else if (p.name.startsWith ("80S"))    eighties.addItem (id, p.name);
+        else                                   m.addItem (id, p.name);   // INIT
+    }
+    m.addSubMenu ("TRANCE", trance);
+    m.addSubMenu ("ITALO DISCO", italo);
+    m.addSubMenu ("80S", eighties);
+    m.addSubMenu ("YOUR PATCHES", user, user.getNumItems() > 0);
+    Component::SafePointer<InstrumentsPage> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&patchList), [safe] (int chosen)
+    {
+        if (safe != nullptr && chosen > 0) safe->choosePatch (chosen - 1);
+    });
+}
+
+void InstrumentsPage::savePatchDialog()
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (! in.isSynth2()) return;
+    auto* w = new AlertWindow ("SAVE PATCH", "Name the patch. It is saved in Documents\\Four Tracker\\Synth 2 Patches.", MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", in.name, "NAME");
+    w->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));
+    Component::SafePointer<InstrumentsPage> safe (this);
+    const int s = slot();
+    w->enterModalState (true, ModalCallbackFunction::create ([safe, w, s] (int result)
+    {
+        if (safe == nullptr || result != 1) return;
+        auto& self = *safe;
+        const auto name = w->getTextEditorContents ("name").trim().toUpperCase();
+        auto& inst = self.st.proc.getInstrument (s);
+        File written;
+        const auto r = synth2::savePatch (name, inst.params.s2, written);
+        if (r.failed()) { self.st.setStatus (r.getErrorMessage().toUpperCase()); self.st.changed(); return; }
+        inst.name = name;
+        self.st.proc.instrumentChanged (s);
+        self.refreshPatches();
+        self.st.setStatus ("PATCH SAVED: " + name);
+        self.instrumentsChanged();
+        self.st.changed();
+    }), true);
 }
 
 void InstrumentsPage::updateSynthVisibility()
 {
+    for (auto& k : knobs) k->setVisible (synth2Mode);
+    for (auto* b : { &patchPrev, &patchNext, &patchList, &patchSave }) b->setVisible (synth2Mode);
     for (auto& b : waveButtons) b->setVisible (synthMode);
     for (auto* sl : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent }) sl->setVisible (synthMode);
     midiChannelBox.setVisible (midiMode);
     midiProgramBox.setVisible (midiMode);
-    wave.setVisible (! synthMode && ! midiMode);   // the waveform buttons show the synth's shape
+    wave.setVisible (! synthMode && ! midiMode && ! synth2Mode);   // the waveform buttons show the synth's shape
     for (auto* sp : { &loop, &pingPong, &reverse })
     {
-        sp->setEnabled (! synthMode && ! midiMode);
-        sp->setAlpha (synthMode || midiMode ? 0.35f : 1.0f);
+        sp->setEnabled (! synthMode && ! midiMode && ! synth2Mode);
+        sp->setAlpha (synthMode || midiMode || synth2Mode ? 0.35f : 1.0f);
     }
     wave.showMarkers = ! synthMode;     // a synth's loop is the whole cycle: no need to shade it
     resized();
@@ -769,9 +897,15 @@ void InstrumentsPage::updateSynthVisibility()
 void InstrumentsPage::instrumentsChanged()
 {
     auto& in = st.proc.getInstrument (slot());
-    const bool nowSynth = in.isSynth(), nowMidi = in.isMidi();
-    if (nowSynth != synthMode || nowMidi != midiMode) { synthMode = nowSynth; midiMode = nowMidi; updateSynthVisibility(); }
-    srcSample.setToggleState (! nowSynth && ! nowMidi, dontSendNotification);
+    const bool nowSynth = in.isSynth(), nowMidi = in.isMidi(), nowSynth2 = in.isSynth2();
+    if (nowSynth != synthMode || nowMidi != midiMode || nowSynth2 != synth2Mode)
+    {
+        synthMode = nowSynth; midiMode = nowMidi; synth2Mode = nowSynth2;
+        updateSynthVisibility();
+    }
+    srcSynth2.setToggleState (nowSynth2, dontSendNotification);
+    for (int p = 0; p < s2NumParams; ++p) knobs[(size_t) p]->setValue (in.params.s2[(size_t) p]);
+    srcSample.setToggleState (! nowSynth && ! nowMidi && ! nowSynth2, dontSendNotification);
     srcSynth.setToggleState (nowSynth, dontSendNotification);
     srcMidi.setToggleState (nowMidi, dontSendNotification);
     midiChannelBox.setValue (in.params.midiChannel);
@@ -832,7 +966,8 @@ void InstrumentsPage::paint (Graphics& g)
         auto tr = dropBar.toFloat().withTrimmedLeft ((float) (srcMidi.getRight() - dropBar.getX()) + 22.0f).withTrimmedRight (12.0f);
         g.reduceClipRegion (tr.toNearestInt());
         Theme::text (g, in.isMidi() ? String ("NOTES GO TO MIDI OUT")
-                       : in.isSynth() ? String ("BUILT-IN SYNTH - WAVEFORM, ENVELOPE AND FILTER")
+                       : in.isSynth() ? String ("SYNTH 1 - WAVEFORM, ENVELOPE AND FILTER")
+                       : in.isSynth2() ? String ("2 OSC, PWM, FILTER, LFO, FX")
                        : in.isEmpty() ? String ("DROP AUDIO FILES HERE OR PRESS LOAD   (WAV AIFF FLAC OGG MP3)")
                        : (in.sourcePath.isNotEmpty() ? in.sourcePath.toUpperCase() : String ("BUILT-IN DEMO SOUND - DROP A FILE TO REPLACE IT")),
                      tr, 16.0f, Theme::ink.withAlpha (0.75f), Justification::centredLeft);
@@ -860,6 +995,28 @@ void InstrumentsPage::paint (Graphics& g)
         g.reduceClipRegion (info.reduced (4.0f).toNearestInt());
         for (auto* l : lines) Theme::text (g, l, r.removeFromTop (32.0f), 15.0f, Theme::screenText, Justification::centredLeft);
         g.restoreState();
+        return;
+    }
+
+    if (synth2Mode)
+    {
+        Theme::text (g, "SYNTH 2", Rectangle<float> ((float) slotPanel.getX() + 16.0f, (float) patchNameBox.getY(), 140.0f, (float) patchNameBox.getHeight()),
+                     25.0f, Theme::ink, Justification::centredLeft, true);
+        Theme::drawScreen (g, patchNameBox.toFloat());
+        const int idx = currentPatchIndex();
+        String shown = in.name.toUpperCase();
+        if (idx >= 0 && ! patches[(size_t) idx].factory) shown = "USER: " + shown;
+        Theme::text (g, shown, patchNameBox.toFloat().reduced (14.0f, 0.0f), 20.0f, Theme::screenText, Justification::centredLeft);
+        for (auto& kg : knobGroups)
+        {
+            auto a = kg.area.toFloat();
+            g.setColour (Theme::panelEdgeLo);
+            g.drawLine (a.getX(), a.getY() + 9.0f, a.getRight(), a.getY() + 9.0f, 1.0f);
+            const float tw = (float) kg.name.length() * 11.0f + 12.0f;
+            g.setColour (Theme::panel);
+            g.fillRect (Rectangle<float> (a.getX() + 6.0f, a.getY(), tw, 18.0f));
+            Theme::text (g, kg.name, Rectangle<float> (a.getX() + 10.0f, a.getY(), tw, 18.0f), 14.0f, Theme::ink, Justification::centredLeft, true);
+        }
         return;
     }
 
@@ -902,7 +1059,7 @@ void InstrumentsPage::paint (Graphics& g)
 
 void InstrumentsPage::mouseDown (const MouseEvent& e)
 {
-    if (synthMode || midiMode || ! slotGrid.contains (e.getPosition())) return;
+    if (synthMode || midiMode || synth2Mode || ! slotGrid.contains (e.getPosition())) return;
     const float cw = (slotGrid.getWidth() - 8.0f) / 4.0f, rh = (slotGrid.getHeight() - 8.0f) / 4.0f;
     const int col = jlimit (0, 3, (int) ((e.position.x - slotGrid.getX() - 4.0f) / cw));
     const int row = jlimit (0, 3, (int) ((e.position.y - slotGrid.getY() - 4.0f) / rh));
@@ -940,13 +1097,52 @@ void InstrumentsPage::resized()
         const int bx = dropBar.getX() + 130, by = dropBar.getY() + 7, bh = dropBar.getHeight() - 14, bw = 118;
         srcSample.setBounds (bx, by, bw, bh);
         srcSynth.setBounds (bx + bw + 6, by, bw, bh);
-        srcMidi.setBounds (bx + 2 * (bw + 6), by, bw, bh);
+        srcSynth2.setBounds (bx + 2 * (bw + 6), by, bw, bh);
+        srcMidi.setBounds (bx + 3 * (bw + 6), by, bw, bh);
     }
 
     if (midiMode)
     {
         midiChannelBox.setBounds (slotPanel.getX() + 280, slotPanel.getY() + 70, 150, 56);
         midiProgramBox.setBounds (slotPanel.getX() + 280, slotPanel.getY() + 140, 150, 56);
+        return;
+    }
+
+    if (synth2Mode)
+    {
+        // title + patch bar on one row, then two rows of knobs in groups
+        const int x0 = slotPanel.getX() + 12, w = slotPanel.getWidth() - 24, py = slotPanel.getY() + 8;
+        patchPrev.setBounds (x0 + 168, py, 52, 40);
+        patchNameBox = { x0 + 226, py, w - 226 - 58 - 130 - 160 - 16, 40 };
+        patchNext.setBounds (patchNameBox.getRight() + 6, py, 52, 40);
+        patchList.setBounds (patchNext.getRight() + 10, py, 130, 40);
+        patchSave.setBounds (patchList.getRight() + 8, py, x0 + w - patchList.getRight() - 8, 40);
+
+        knobGroups.clear();
+        const int gap = 14, kh = jmin (128, (slotPanel.getBottom() - (py + 52) - 2 * 18 - 10) / 2);
+        auto layoutRow = [&] (int y, std::initializer_list<std::pair<const char*, std::initializer_list<int>>> groups)
+        {
+            int count = 0, ngroups = 0;
+            for (auto& g : groups) { count += (int) g.second.size(); ++ngroups; }
+            const int kw = (w - gap * (ngroups - 1)) / jmax (1, count);
+            int x = x0;
+            for (auto& g : groups)
+            {
+                const int gx = x;
+                for (int p : g.second) { knobs[(size_t) p]->setBounds (x, y + 21, kw, kh - 3); x += kw; }
+                knobGroups.push_back ({ g.first, { gx, y, x - gx, kh + 18 } });
+                x += gap;
+            }
+        };
+        layoutRow (py + 50, { { "OSC 1", { s2Osc1Wave, s2Osc1PW } },
+                              { "OSC 2", { s2Osc2Wave, s2Osc2Semi, s2Osc2Fine, s2OscMix } },
+                              { "FILTER", { s2Cutoff, s2Reso, s2EnvAmt, s2FDecay } },
+                              { "LFO", { s2LfoShape, s2LfoSync, s2LfoRate } } });
+        layoutRow (py + 50 + kh + 26, { { "AMP", { s2Attack, s2Decay, s2Sustain, s2Release } },
+                                        { "LFO TO", { s2LfoPitch, s2LfoPwm, s2LfoFilter } },
+                                        { "CHORUS", { s2Chorus } },
+                                        { "DELAY", { s2DelayTime, s2DelayFb, s2DelayMix } },
+                                        { "REVERB", { s2ReverbSize, s2ReverbMix } } });
         return;
     }
 

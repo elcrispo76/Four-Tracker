@@ -7,7 +7,7 @@
 ; ===========================================================================
 
 #define AppName      "Four Tracker"
-#define AppVersion   "0.4.0"
+#define AppVersion   "0.5.0"
 #define AppPublisher "Four Tracker"
 #define AppExe       "Four Tracker.exe"
 #define Root         AddBackslash(SourcePath) + "..\"
@@ -51,6 +51,7 @@
   #endif
 #endif
 #define HasManual   FileExists(AddBackslash(SourcePath) + "Four Tracker User Manual.pdf")
+#define HasSamples  DirExists(AddBackslash(SourcePath) + "Sample Pack")
 
 [Setup]
 AppId={{6E3B0C8A-4F1D-4B7E-9A55-2C7F31D9E4A1}
@@ -72,9 +73,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 CloseApplications=yes
+; the sample pack goes into the user's Documents folder
+UsedUserAreasWarning=no
 
 [Types]
-Name: "full";   Description: "Program and all plugins"
+Name: "full";   Description: "Program, all plugins and the sample pack"
 Name: "app";    Description: "Program only"
 Name: "custom"; Description: "Choose what to install"; Flags: iscustom
 
@@ -91,6 +94,10 @@ Name: "vst2";    Description: "VST2 plugin, 64-bit"; Types: full
 #endif
 #if HasVst2_32
 Name: "vst2_32"; Description: "VST2 plugin, 32-bit (for 32-bit hosts such as older Music Maker)"; Types: full
+#endif
+
+#if HasSamples
+Name: "samples"; Description: "Four Tracker Sample Pack (88 drum, bass and synth sounds, CC0) in Documents\Four Tracker\Samples"; Types: full app
 #endif
 
 [Tasks]
@@ -114,10 +121,17 @@ Source: "{#Dist64}Four Tracker.dll"; DestDir: "{code:GetVst2Dir64}"; Components:
 Source: "{#Dist32}Four Tracker.dll"; DestDir: "{code:GetVst2Dir32}"; Components: vst2_32; Flags: ignoreversion
 #endif
 
+#if HasSamples
+Source: "Sample Pack\*"; DestDir: "{userdocs}\Four Tracker\Samples\Four Tracker Sample Pack"; Components: samples; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 #if HasManual
 Name: "{group}\{#AppName} User Manual"; Filename: "{app}\Four Tracker User Manual.pdf"
+#endif
+#if HasSamples
+Name: "{group}\{#AppName} Sample Pack"; Filename: "{userdocs}\Four Tracker\Samples\Four Tracker Sample Pack"; Components: samples
 #endif
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon

@@ -362,6 +362,15 @@ bool FourTrackerEditor::keyPressed (const KeyPress& k)
         heldNoteKeys.insert (kc);
         jamNoteDown = true;
         jamInstrument = proc.selectedInstrument;
+
+        // CHORD: each held key on its own track (pattern pages, Instruments, Sample Edit)
+        const bool notePlace = patternView.isVisible() ? (! state.editMode || state.cursorCol == 0)
+                                                       : (page == Page::Instruments || page == Page::SampleEdit);
+        if (proc.chordMode && notePlace && ! mods.isAnyModifierKeyDown() && chordNoteDown (kc, noteKey))
+        {
+            title.refresh(); header.refresh();
+            return true;
+        }
     }
 
     if (patternView.isVisible())
@@ -391,6 +400,55 @@ bool FourTrackerEditor::keyPressed (const KeyPress& k)
     return false;
 }
 
+bool FourTrackerEditor::chordNoteDown (int keyCode, int note)
+{
+    // the first free place in the chord: 0 = the cursor's track, 1 = the next track ...
+    if (chordKeys.empty()) { chordBaseCh = state.cursorCh; chordRow = state.cursorRow; }
+    int offset = 0;
+    for (bool used = true; used; )
+    {
+        used = false;
+        for (auto& [key, ck] : chordKeys) if (ck.offset == offset) { used = true; ++offset; break; }
+    }
+    const int ch = chordBaseCh + offset;
+    if (ch >= state.numChannels())
+    {
+        state.setStatus ("CHORD: NO MORE TRACKS TO THE RIGHT - ADD TRACKS WITH + OR START FURTHER LEFT");
+        return true;   // swallow the key: it has no track to go to
+    }
+    const int inst = proc.selectedInstrument;
+    chordKeys[keyCode] = { offset, ch, inst };
+
+    auto& e = proc.getEngine();
+    if (patternView.isVisible() && state.editMode)
+    {
+        // the first note goes where the cursor is and moves it on; the others go on the same row, next tracks
+        patternView.writeChordNote (chordRow, ch, note, offset == 0 && chordKeys.size() == 1);
+        if (! e.playing.load()) e.requestJam (inst, note, ch);
+        state.changed();
+    }
+    else
+    {
+        e.requestJam (inst, note, ch);
+    }
+    return true;
+}
+
+void FourTrackerEditor::releaseChordKeys (bool all)
+{
+    for (auto it = chordKeys.begin(); it != chordKeys.end();)
+    {
+        const int kc = it->first;
+        const bool down = ! all && (KeyPress::isKeyCurrentlyDown (kc) || (kc >= 'A' && kc <= 'Z' && KeyPress::isKeyCurrentlyDown (kc + 32)));
+        if (down) { ++it; continue; }
+        // like a single note: a sample without a loop plays to its end; loops, synths and MIDI notes stop
+        const auto& in = proc.getInstrument (it->second.inst);
+        if (! in.isEmpty() && (in.params.loop || in.isMidi()))
+            proc.getEngine().requestJamOff (it->second.channel);
+        it = chordKeys.erase (it);
+    }
+}
+
 bool FourTrackerEditor::keyStateChanged (bool isKeyDown)
 {
     if (isKeyDown) return false;
@@ -403,6 +461,8 @@ bool FourTrackerEditor::keyStateChanged (bool isKeyDown)
                        || (kc >= 'A' && kc <= 'Z' && KeyPress::isKeyCurrentlyDown (kc + 32));
         it = down ? std::next (it) : heldNoteKeys.erase (it);
     }
+
+    releaseChordKeys (false);
 
     if (heldNoteKeys.empty() && jamNoteDown)
     {
@@ -419,6 +479,7 @@ bool FourTrackerEditor::keyStateChanged (bool isKeyDown)
 void FourTrackerEditor::focusLost (FocusChangeType)
 {
     heldNoteKeys.clear();
+    releaseChordKeys (true);
     if (jamNoteDown)
     {
         jamNoteDown = false;

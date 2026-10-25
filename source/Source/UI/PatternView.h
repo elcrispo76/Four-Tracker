@@ -38,6 +38,10 @@ public:
 
     void refreshFromEngine();   // called by the editor timer
 
+    /** CHORD: writes a note (with the selected instrument) at row / channel, optionally
+        moving the cursor down SPACING rows afterwards. */
+    void writeChordNote (int row, int channel, int note, bool advanceCursor);
+
 private:
     struct Geometry
     {

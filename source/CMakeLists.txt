@@ -6,7 +6,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Mac CPUs")
 endif()
 
-project(FourTracker VERSION 0.4.0 LANGUAGES C CXX)
+project(FourTracker VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -125,6 +125,7 @@ juce_add_plugin(FourTracker
 target_sources(FourTracker PRIVATE
     Source/TrackerTypes.cpp
     Source/Instrument.cpp
+    Source/Synth2.cpp
     Source/AmigaSamples.cpp
     Source/TrackerEngine.cpp
     Source/DemoContent.cpp

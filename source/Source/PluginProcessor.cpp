@@ -125,9 +125,29 @@ void FourTrackerProcessor::instrumentChanged (int slot)
 // synth MIDI LEARN
 // ---------------------------------------------------------------------------
 
+namespace
+{
+    // MIDI LEARN targets: 0..7 = SYNTH 1's sliders, kSynth2Knob + n = SYNTH 2's knob n
+    bool validKnobTarget (int param)
+    {
+        return juce::isPositiveAndBelow (param, (int) ft::numSynthParams)
+            || juce::isPositiveAndBelow (param - FourTrackerProcessor::kSynth2Knob, (int) ft::s2NumParams);
+    }
+    int* knobSlot (ft::InstrumentParams& p, int param)
+    {
+        if (param >= FourTrackerProcessor::kSynth2Knob) return &p.cc2[(size_t) (param - FourTrackerProcessor::kSynth2Knob)];
+        return &p.cc[(size_t) param];
+    }
+    juce::String knobTargetName (int param)
+    {
+        return param >= FourTrackerProcessor::kSynth2Knob ? juce::String (ft::synth2::name (param - FourTrackerProcessor::kSynth2Knob))
+                                                          : juce::String (ft::synthParamName (param));
+    }
+}
+
 void FourTrackerProcessor::startSynthLearn (int slot, int param)
 {
-    if (slot <= 0 || slot >= kNumInstruments || ! juce::isPositiveAndBelow (param, (int) ft::numSynthParams)) return;
+    if (slot <= 0 || slot >= kNumInstruments || ! validKnobTarget (param)) return;
     int cc = 0, v = 0;
     while (engine.popController (cc, v)) {}      // only a knob moved from now on counts
     learnSlot = slot;
@@ -144,8 +164,8 @@ void FourTrackerProcessor::cancelSynthLearn()
 
 void FourTrackerProcessor::forgetSynthKnob (int slot, int param)
 {
-    if (slot <= 0 || slot >= kNumInstruments || ! juce::isPositiveAndBelow (param, (int) ft::numSynthParams)) return;
-    instruments[(size_t) slot].params.cc[(size_t) param] = -1;
+    if (slot <= 0 || slot >= kNumInstruments || ! validKnobTarget (param)) return;
+    *knobSlot (instruments[(size_t) slot].params, param) = -1;
     instrumentChanged (slot);
     ++knobRevision;
 }
@@ -162,11 +182,13 @@ void FourTrackerProcessor::applyMidiKnobs()
         {
             // one knob moves one slider: take it away from wherever it was
             for (auto& in : instruments)
-                for (auto& c : in.params.cc)
-                    if (c == cc) c = -1;
+            {
+                for (auto& c : in.params.cc)  if (c == cc) c = -1;
+                for (auto& c : in.params.cc2) if (c == cc) c = -1;
+            }
             auto& in = instruments[(size_t) learnSlot];
-            in.params.cc[(size_t) learnParam] = cc;
-            knobMessage = "CC " + juce::String (cc) + " NOW MOVES " + ft::synthParamName (learnParam)
+            *knobSlot (in.params, learnParam) = cc;
+            knobMessage = "CC " + juce::String (cc) + " NOW MOVES " + knobTargetName (learnParam)
                         + " OF SLOT " + juce::String::toHexString (learnSlot).paddedLeft ('0', 2).toUpperCase();
             const int slot = learnSlot;
             learnSlot = learnParam = -1;
@@ -183,16 +205,26 @@ void FourTrackerProcessor::applyMidiKnobs()
     for (int slot = 1; slot < kNumInstruments; ++slot)
     {
         auto& in = instruments[(size_t) slot];
-        if (! in.isSynth()) continue;
         bool changed = false;
-        for (int p = 0; p < ft::numSynthParams; ++p)
-        {
-            const int c = in.params.cc[(size_t) p];
-            if (c < 0 || latest[(size_t) c] < 0) continue;
-            int& ref = ft::synthParamRef (in.params, p);
-            const int v = ft::synthParamFromMidi (p, latest[(size_t) c]);
-            if (v != ref) { ref = v; changed = true; }
-        }
+        if (in.isSynth())
+            for (int p = 0; p < ft::numSynthParams; ++p)
+            {
+                const int c = in.params.cc[(size_t) p];
+                if (c < 0 || latest[(size_t) c] < 0) continue;
+                int& ref = ft::synthParamRef (in.params, p);
+                const int v = ft::synthParamFromMidi (p, latest[(size_t) c]);
+                if (v != ref) { ref = v; changed = true; }
+            }
+        else if (in.isSynth2())
+            for (int p = 0; p < ft::s2NumParams; ++p)
+            {
+                const int c = in.params.cc2[(size_t) p];
+                if (c < 0 || latest[(size_t) c] < 0) continue;
+                int& ref = in.params.s2[(size_t) p];
+                const int v = juce::roundToInt (latest[(size_t) c] * ft::synth2::maxValue (p) / 127.0);
+                if (v != ref) { ref = v; changed = true; }
+            }
+        else continue;
         if (changed)
         {
             in.sanitise();
@@ -373,6 +405,14 @@ juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
             for (auto c : p.cc) ccs.add (juce::String (c));
             it.setProperty ("knobs", ccs.joinIntoString (","), nullptr);
         }
+        if (p.synth2)
+        {
+            it.setProperty ("synth2", true, nullptr);
+            it.setProperty ("s2", ft::synth2::toString (p.s2), nullptr);
+            juce::StringArray ccs;
+            for (auto c : p.cc2) ccs.add (juce::String (c));
+            it.setProperty ("knobs2", ccs.joinIntoString (","), nullptr);
+        }
         it.setProperty ("rate", in.data->sampleRate, nullptr);
         it.setProperty ("bits", in.data->bitDepth, nullptr);
         it.setProperty ("channels", in.data->getNumChannels(), nullptr);
@@ -439,6 +479,14 @@ void FourTrackerProcessor::instrumentsFromTree (const juce::ValueTree& t)
             juce::StringArray ccs;
             ccs.addTokens (it.getProperty ("knobs", "").toString(), ",", "");
             for (int k = 0; k < (int) p.cc.size(); ++k) p.cc[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
+        }
+        p.synth2 = it.getProperty ("synth2", false);
+        if (p.synth2)
+        {
+            p.s2 = ft::synth2::fromString (it.getProperty ("s2", "").toString());
+            juce::StringArray ccs;
+            ccs.addTokens (it.getProperty ("knobs2", "").toString(), ",", "");
+            for (int k = 0; k < (int) p.cc2.size(); ++k) p.cc2[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
         }
         p.midi = it.getProperty ("midi", false);
         p.midiChannel = it.getProperty ("midiCh", 1);
