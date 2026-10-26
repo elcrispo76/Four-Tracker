@@ -25,6 +25,11 @@ public:
     /** Audio thread: runs the channel's effects over its stereo buffer. */
     void process (int channel, float* left, float* right, int numSamples) noexcept;
 
+    /** Audio thread, once per block before process(): the song position the effects see
+        (tempo-synced delays, the Breakbeat Processor and so on follow it). */
+    struct Transport { bool playing = false; double bpm = 125.0; double ppq = 0.0; juce::int64 samples = 0; };
+    void setTransport (const Transport& t) noexcept { head.t = t; }
+
     // ---- folders and scanning (message thread) --------------------------------
     juce::FileSearchPath& getSearchPath() noexcept { return searchPath; }
     void startScan();
@@ -53,6 +58,12 @@ public:
     void setBypass (int channel, int slot, bool b);
     bool isBypassed (int channel, int slot) const;
     void showEditor (int channel, int slot);
+    /** The loaded plugin (message thread; for tests and the editor). */
+    juce::AudioPluginInstance* getInstance (int channel, int slot) const
+    {
+        return juce::isPositiveAndBelow (channel, ft::kNumChannels) && juce::isPositiveAndBelow (slot, kSlotsPerChannel)
+                 ? slots[(size_t) channel][(size_t) slot].plugin.get() : nullptr;
+    }
 
     /** Chaining: a channel can send its sound (after its own effects) on into another
         channel's effects instead of straight out. -1 = straight out (master). */
@@ -73,6 +84,23 @@ private:
         std::atomic<bool> bypass { false };
         int ins = 2, outs = 2;
     };
+
+    struct HostHead : public juce::AudioPlayHead
+    {
+        Transport t;
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo p;
+            p.setIsPlaying (t.playing);
+            p.setBpm (t.bpm);
+            p.setTimeSignature (TimeSignature { 4, 4 });
+            p.setPpqPosition (t.ppq);
+            p.setPpqPositionOfLastBarStart (std::floor (t.ppq / 4.0) * 4.0);
+            p.setBarCount ((juce::int64) std::floor (t.ppq / 4.0));
+            p.setTimeInSamples (t.samples);
+            return p;
+        }
+    } head;
 
     void timerCallback() override;
     void notify() { listeners.call ([] (Listener& l) { l.fxChanged(); }); }

@@ -1221,6 +1221,41 @@ int main (int argc, char** argv)
                 CHECK (byp > 0.05f, "FX build: BYPASS gives the dry sound back");
                 host->setBypass (0, 0, false);
 
+                // a tempo-synced effect follows the song: the Breakbeat Processor (FT_BREAKBEAT_VST3=path)
+                if (auto* bbPath = std::getenv ("FT_BREAKBEAT_VST3"))
+                {
+                    OwnedArray<PluginDescription> bbFound;
+                    KnownPluginList bbl;
+                    for (auto* f : fm.getFormats())
+                        if (f->fileMightContainThisPluginType (bbPath))
+                            bbl.scanAndAddFile (bbPath, true, bbFound, *f);
+                    CHECK (bbFound.size() == 1 && ! bbFound[0]->isInstrument, "Breakbeat Processor VST3 found as an effect");
+                    if (bbFound.size() == 1)
+                    {
+                        const auto err = host->loadSlot (0, 1, *bbFound[0]);
+                        auto* inst = host->getInstance (0, 1);
+                        CHECK (err.isEmpty() && inst != nullptr, "Breakbeat Processor loads into CH1 FX2 " + err);
+                        auto setSteps = [&] (int action)
+                        {
+                            for (auto* prm : inst->getParameters())
+                                if (prm->getName (32).startsWith ("Step "))
+                                    prm->setValueNotifyingHost ((float) action / 7.0f);
+                        };
+                        host->setBypass (0, 0, true);                    // FX1 is an instrument (silent)
+                        setSteps (6);                                    // all STOP
+                        peakCh (20);
+                        const float stopped = peakCh (120);
+                        setSteps (0);                                    // all "-" (straight through)
+                        peakCh (20);
+                        const float thru = peakCh (120);
+                        CHECK (stopped < 0.001f && thru > 0.05f,
+                               "Breakbeat Processor in Four Tracker follows the song (STOP steps silent " + String (stopped, 4)
+                                 + ", empty steps " + String (thru, 3) + ")");
+                        host->clearSlot (0, 1);
+                        host->setBypass (0, 0, false);
+                    }
+                }
+
                 // settings file: a new FX host restores the slot after prepare
                 host->saveSettings();
                 ef.requestStop();
@@ -2203,6 +2238,55 @@ int main (int argc, char** argv)
         play (outLoop);
         CHECK (outLoop > 0.0, "a chaining loop is ignored (the sound still comes out)");
         er.channelInsert = nullptr; er.channelRoute = nullptr;
+    }
+
+    // the song position the channel effects see (tempo-synced effects like the Breakbeat Processor)
+    {
+        auto pt = std::make_unique<FourTrackerProcessor>();
+        pt->prepareToPlay (44100.0, Runner::block);
+        auto& et = pt->getEngine();
+        ft::TrackerEngine::InsertTransport first, last;
+        bool seen = false;
+        et.channelInsert = [&] (int, float*, float*, int)
+        {
+            if (! seen && et.insertTransport.playing) { first = et.insertTransport; seen = true; }
+            last = et.insertTransport;
+        };
+        et.bpm = 125; et.speed = 6;
+        et.requestPattern (0);
+        if (! et.playing.load()) et.requestStartStop();
+        Runner rt { *pt };
+        rt.run ((int) (2.0 * 44100.0 / Runner::block));            // ~2 s
+        const double secs = (double) last.samples / 44100.0;
+        CHECK (seen && first.ppq < 0.05 && std::abs (last.bpm - 125.0) < 1e-6 && std::abs (last.ppq - secs * 125.0 / 60.0) < 0.01 && secs > 1.9,
+               "effects see the song: 125 BPM, position " + String (last.ppq, 3) + " beats after " + String (secs, 2) + " s");
+        et.speed = 3;
+        rt.run (4);
+        CHECK (std::abs (last.bpm - 250.0) < 1e-6, "SPEED 3 at 125 = 250 BPM for the effects (" + String (last.bpm, 1) + ")");
+        et.requestStop(); rt.run (2);
+        CHECK (! last.playing, "effects see STOP");
+
+        // a 24-row pattern looping: every new time round starts on a multiple of 16 beats (64 rows),
+        // so the effects' bars start with the pattern
+        et.speed = 6;
+        et.getPattern (0).numRows = 24;
+        std::vector<double> tops;
+        double prev = -1.0;
+        et.channelInsert = [&] (int, float*, float*, int)
+        {
+            const auto& t = et.insertTransport;
+            if (t.playing && prev >= 0.0 && std::fmod (t.ppq, 16.0) < std::fmod (prev, 16.0) - 1.0) tops.push_back (t.ppq);
+            if (t.playing) prev = t.ppq;
+        };
+        et.requestPattern (0);
+        et.requestStartStop();
+        rt.run ((int) (7.0 * 44100.0 / Runner::block));             // 24 rows = 2.88 s, so two tops
+        et.requestStop(); rt.run (2);
+        CHECK (tops.size() >= 2 && std::abs (tops[0] - 16.0) < 0.05 && std::abs (tops[1] - 32.0) < 0.05,
+               "24-row pattern: the effects see each new round start at beat 16, 32 ... ("
+                 + (tops.size() >= 2 ? String (tops[0], 2) + ", " + String (tops[1], 2) : String ((int) tops.size())) + ")");
+        et.getPattern (0).numRows = ft::kDefaultRows;
+        et.channelInsert = nullptr;
     }
 
     if (screens)

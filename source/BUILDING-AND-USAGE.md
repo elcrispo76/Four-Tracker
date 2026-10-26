@@ -290,6 +290,9 @@ only load in the personal FX version.
   through CH1's effects, so one reverb or delay can be shared by several tracks. Chains can be longer
   (CH3 into CH2 into CH1); a loop is refused. Removing a track or NEW MODULE / Empty removes its chaining.
 - The folders, the scanned list, the chosen effects, the chaining and all effect settings are saved and come back next time.
+- The effects get Four Tracker's tempo and song position, so tempo-synced effects (delays, the free Breakbeat
+  Processor slicer from the website ...) follow the song: 4 rows to a beat (SPEED 6 at 125 = 125 BPM), and each time
+  a pattern starts from the top it starts on a new bar.
 - A 64-bit Four Tracker loads 64-bit plugins only, and the 32-bit version 32-bit plugins only.
 - In the plugin versions (VST3 / VST2 inside a DAW), the FX page is not there: use the DAW's own effects.
 

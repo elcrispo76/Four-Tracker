@@ -34,10 +34,17 @@
 - **Sample pack:** 88 drum, bass and synth sounds (WAV, CC0), installed to Documents\Four Tracker\Samples.
 - **SPACING (0-32):** how many rows the cursor moves after a note and with the up / down arrows.
 - **VST3 effects** in the standalone app: two per track, with bypass, and chaining (send a track on into another
-  track's effects, so one reverb or delay can be shared).
+  track's effects, so one reverb or delay can be shared). Effects get Four Tracker's tempo and song position, so
+  tempo-synced effects follow the song.
 - **Modules (.ftm)** hold patterns and samples in one file.
 - **Windows:** standalone app (Windows Audio, DirectSound, ASIO) and **VST3 plugin**, 64-bit and 32-bit.
 - **Mac:** standalone app and **Audio Unit** instrument, Apple Silicon + Intel, with Audio Unit effects.
+
+## Breakbeat Processor (free VST3 effect)
+
+An 8 step breakbeat slicer that retriggers, reverses, cuts and crushes a track in time with the song, in Four Tracker
+or any DAW. Download the installer under [Releases](https://github.com/elcrispo76/Four-Tracker/releases) (tag
+`breakbeat-1.0.0`). Source and build notes: [`breakbeat-processor/`](breakbeat-processor/).
 
 ## Repository layout
 
@@ -47,6 +54,7 @@
 | `source/` | The program's source code, build scripts and installer script |
 | `source/BUILDING-AND-USAGE.md` | Keys, effect list, file formats, building and making the installer |
 | `source/installer/Sample Pack/` | The Four Tracker Sample Pack (CC0) that the installer adds |
+| `breakbeat-processor/` | Breakbeat Processor, the free VST3 effect (its own build: `build-windows.bat`) |
 | `CREDITS.md` | Third-party software and licences |
 | `CLONE-CHECK.md` | Check of the source against six open-source trackers for copied code |
 | `LICENSE` | GNU AGPLv3 |

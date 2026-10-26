@@ -165,6 +165,7 @@ String FxHost::loadSlot (int channel, int index, const PluginDescription& desc)
     AudioBuffer<float> scratch;
     int ins = 2, outs = 2;
     preparePlugin (*inst, scratch, ins, outs, sr, blockSize);
+    inst->setPlayHead (&head);
 
     windows[(size_t) channel][(size_t) index].reset();
     auto& s = slots[(size_t) channel][(size_t) index];

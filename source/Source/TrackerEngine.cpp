@@ -251,6 +251,9 @@ void TrackerEngine::resetChannels (bool keepVoices)
 void TrackerEngine::startPlayback()
 {
     lfoClock = 0.0;     // SYNTH 2's tempo LFO starts with the pattern
+    insertBase = 0.0;   // and so does the song position the effects see
+    insertLastRow = 0.0;
+    insertSamples = 0;
     int p = selectedPattern.load();
     const int q = queuedPattern.exchange (-1);
     if (q >= 0) p = q;
@@ -1368,6 +1371,25 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
 
     // per-channel rendering for the channel inserts (VST effects)
     useChannelBuffers = channelInsert != nullptr && n <= chanScratchSize;
+    const bool playingAtStart = playing.load();
+    const int spd = juce::jmax (1, speed.load());
+    const double spt = samplesPerTick();
+    const double beatsPerSecond = sr * 2.5 / spt * 6.0 / spd / 60.0;
+    if (playingAtStart)
+    {
+        // where the sound is now, in rows: the tick about to start, or part-way through the last one
+        double rowPos;
+        if (samplesToNextTick <= 0.0) rowPos = row + (double) juce::jmin (tick, spd - 1) / spd;
+        else
+        {
+            const int heard = tick == 0 ? spd - 1 : tick - 1;
+            rowPos = playRow.load() + (juce::jmin (heard, spd - 1) + juce::jlimit (0.0, 1.0, 1.0 - samplesToNextTick / spt)) / spd;
+        }
+        if (rowPos + 1.0e-9 < insertLastRow)              // back to the top: the next 16 beats
+            insertBase = (std::floor ((insertBase + insertLastRow / 4.0) / 16.0) + 1.0) * 16.0;
+        insertLastRow = rowPos;
+    }
+    insertTransport = { playingAtStart, beatsPerSecond * 60.0, insertBase + insertLastRow / 4.0, insertSamples };
     if (useChannelBuffers)
         for (int ch = 0; ch < kNumChannels; ++ch)
         {
@@ -1443,6 +1465,11 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
                 juce::FloatVectorOperations::add (t >= 0 ? chanL (t) : L, cl, n);
                 juce::FloatVectorOperations::add (t >= 0 ? chanR (t) : R, cr, n);
             }
+    }
+
+    if (playing.load())
+    {
+        if (playingAtStart) insertSamples += n;
     }
 
     // master gain + soft knee limiter so four loud channels never clip hard

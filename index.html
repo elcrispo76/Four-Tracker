@@ -245,6 +245,7 @@ section { padding-block: 44px; }
 
 /* ---------- download ---------- */
 .download-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+#effects .download-grid { align-items: start; }
 .dl-card { padding: 22px; display: grid; gap: 14px; align-content: start; }
 .dl-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.03em; }
 .spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 0.95rem; margin: 0; }
@@ -301,6 +302,7 @@ footer .wrap { display: grid; gap: 8px; }
       <a href="#features">FEATURES</a>
       <a href="#screens">SCREENS</a>
       <a href="#download">DOWNLOAD</a>
+      <a href="#effects">EFFECTS</a>
       <a href="#donate">DONATE</a>
     </nav>
   </div>
@@ -443,6 +445,29 @@ footer .wrap { display: grid; gap: 8px; }
     </div>
   </section>
 
+  <section id="effects">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>FREE EFFECT: BREAKBEAT PROCESSOR</h2>
+        <p>A separate VST3 effect for Four Tracker and any DAW: an 8 step slicer that retriggers, reverses, cuts and crushes a track in time with the song.</p>
+      </div>
+      <div class="download-grid">
+        <figure class="shot"><img src="images/breakbeat-processor.png" alt="Breakbeat Processor: 8 step pads, tools and knobs." loading="lazy" width="940" height="560"><figcaption><b>BREAKBEAT PROCESSOR</b>Slices 8 to 64 rows (1/2 to 4 bars) of a track, 8 steps.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>BREAKBEAT PROCESSOR <span class="js-bb-version">v1.0.0</span></h3>
+          <p>Put it on a break, a beat or a bassline. Each of the 8 steps can retrigger the track from one of its four quarters (1/4 - 4/4) and let it play on, like putting a sample in again on that row, or play it backwards, stop it or bit-crush it. It follows the tempo and position of Four Tracker or your DAW, and in hosts that send no tempo it runs on its own TEMPO from the moment the sound starts. READ AHEAD lets it read the whole part of the track before it is heard, in DAWs with delay compensation.</p>
+          <dl class="spec">
+            <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
+            <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
+            <dt>Price</dt><dd>Free</dd>
+          </dl>
+          <div><a class="btn btn-red js-bb-download" href="#effects"><span class="btn-text">DOWNLOAD VST3<small class="js-bb-filename">BreakbeatProcessor-Setup-1.0.0.exe</small></span></a></div>
+          <p class="note">Installs into Common Files\VST3. Rescan your plugins afterwards (in Four Tracker: FX, SCAN).</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="status">
     <div class="wrap">
       <div class="section-head">
@@ -504,7 +529,10 @@ const SITE = {
   // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
   donate:   "https://ko-fi.com/fourtracker",
   donateLabel: "Any amount",
-  manual:   "Four-Tracker-User-Manual.pdf"
+  manual:   "Four-Tracker-User-Manual.pdf",
+  // Breakbeat Processor (the separate effect): its installer on GitHub
+  bbVersion:  "1.0.0",
+  bbDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/breakbeat-1.0.0/BreakbeatProcessor-Setup-1.0.0.exe"
 };
 /* ============================================================ */
 
@@ -517,6 +545,9 @@ const SITE = {
   document.querySelectorAll(".js-download").forEach(el => SITE.download ? ext(el, SITE.download) : null);
   document.querySelectorAll(".js-donate").forEach(el => SITE.donate ? ext(el, SITE.donate) : null);
   document.querySelectorAll(".js-manual").forEach(el => { el.href = SITE.manual; });
+  document.querySelectorAll(".js-bb-version").forEach(el => el.textContent = "v" + SITE.bbVersion);
+  document.querySelectorAll(".js-bb-filename").forEach(el => el.textContent = decodeURIComponent (SITE.bbDownload.split("/").pop()));
+  document.querySelectorAll(".js-bb-download").forEach(el => SITE.bbDownload ? ext(el, SITE.bbDownload) : null);
   document.getElementById("year").textContent = String(new Date().getFullYear());
 
   /* ---- live keyboard map: C-2 = start/stop, C#2 up = patterns 00, 01, 02 ... ---- */

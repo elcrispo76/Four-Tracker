@@ -111,6 +111,14 @@ public:
         goes on into after its own, or -1 for straight out. Loops are ignored. */
     std::function<int (int channel)> channelRoute;
 
+    /** The song position the channel effects see during channelInsert (tempo-synced effects).
+        BPM is the musical tempo: 4 rows to a beat, so SPEED 6 at 125 = 125 BPM, SPEED 3 = 250.
+        The position follows the pattern rows (row 16 = beat 4), and every time a pattern starts
+        again from the top it moves on to the next 16 beats (64 rows), so effects that work in
+        bars (16, 32 or 64 rows) always start with the pattern. */
+    struct InsertTransport { bool playing = false; double bpm = 125.0; double ppq = 0.0; juce::int64 samples = 0; };
+    InsertTransport insertTransport;
+
     /** MIDI out from MIDI instruments (filled by process(), read and cleared by the processor). */
     juce::MidiBuffer midiOut;
 
@@ -275,6 +283,9 @@ private:
     double sr = 44100.0;
     double samplesToNextTick = 0.0;
     double currentHostBpm = -1.0;
+    double insertBase = 0.0;              // beats at the top of the playing pattern (multiple of 16)
+    double insertLastRow = 0.0;
+    juce::int64 insertSamples = 0;
     int tick = 0;
     int row = 0;
     int pattern = 0;

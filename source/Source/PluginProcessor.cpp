@@ -30,7 +30,12 @@ FourTrackerProcessor::FourTrackerProcessor()
     if (wrapperType == wrapperType_Standalone)
     {
         fx = std::make_unique<FxHost>();
-        engine.channelInsert = [this] (int ch, float* l, float* r, int n) { fx->process (ch, l, r, n); };
+        engine.channelInsert = [this] (int ch, float* l, float* r, int n)
+        {
+            const auto& t = engine.insertTransport;
+            fx->setTransport ({ t.playing, t.bpm, t.ppq, t.samples });
+            fx->process (ch, l, r, n);
+        };
         engine.channelRoute = [this] (int ch) { return fx->getRoute (ch); };
     }
    #endif
