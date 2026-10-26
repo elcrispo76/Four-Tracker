@@ -246,6 +246,7 @@ section { padding-block: 44px; }
 /* ---------- download ---------- */
 .download-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 #effects .download-grid { align-items: start; }
+#effects .fx-second { margin-top: 28px; }
 .dl-card { padding: 22px; display: grid; gap: 14px; align-content: start; }
 .dl-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.03em; }
 .spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 0.95rem; margin: 0; }
@@ -448,8 +449,8 @@ footer .wrap { display: grid; gap: 8px; }
   <section id="effects">
     <div class="wrap">
       <div class="section-head">
-        <h2>FREE EFFECT: BREAKBEAT PROCESSOR</h2>
-        <p>A separate VST3 effect for Four Tracker and any DAW: an 8 step slicer that retriggers, reverses, cuts and crushes a track in time with the song.</p>
+        <h2>FREE EFFECTS</h2>
+        <p>Separate VST3 effects for Four Tracker and any DAW, in the same look. Each has its own installer, which asks which VST3 folder to use.</p>
       </div>
       <div class="download-grid">
         <figure class="shot"><img src="images/breakbeat-processor.png" alt="Breakbeat Processor: 8 step pads, tools and knobs." loading="lazy" width="940" height="560"><figcaption><b>BREAKBEAT PROCESSOR</b>Slices 8 to 64 rows (1/2 to 4 bars) of a track, 8 steps.</figcaption></figure>
@@ -462,7 +463,21 @@ footer .wrap { display: grid; gap: 8px; }
             <dt>Price</dt><dd>Free</dd>
           </dl>
           <div><a class="btn btn-red js-bb-download" href="#effects"><span class="btn-text">DOWNLOAD VST3<small class="js-bb-filename">BreakbeatProcessor-Setup-1.0.0.exe</small></span></a></div>
-          <p class="note">Installs into Common Files\VST3. Rescan your plugins afterwards (in Four Tracker: FX, SCAN).</p>
+          <p class="note">Installs into the VST3 folder you choose (standard: Common Files\VST3). Rescan your plugins afterwards (in Four Tracker: FX, SCAN).</p>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/fx-processor.png" alt="FX Processor: filter, PW, LFO, chorus, delay and reverb panels with knobs." loading="lazy" width="1100" height="648"><figcaption><b>FX PROCESSOR</b>Filter, PW gate, chorus, LFO, delay and reverb.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>FX PROCESSOR <span class="js-fx-version">v1.0.0</span></h3>
+          <p>Six effects in one: a resonant FILTER (low-, band- or high-pass), a PW trance gate in time with the song, a stereo CHORUS, a tempo-synced DELAY with tone and ping-pong, and a REVERB. The LFO (sine, triangle, saw, square or sample &amp; hold, 1/16 to 4 bars or free) moves the filter cutoff and the PW width. 13 presets, from TRANCE GATE and WOBBLE to DUB DELAY and SPACE CHORUS.</p>
+          <dl class="spec">
+            <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
+            <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
+            <dt>Price</dt><dd>Free</dd>
+          </dl>
+          <div><a class="btn btn-red js-fx-download" href="#effects"><span class="btn-text">DOWNLOAD VST3<small class="js-fx-filename">FxProcessor-Setup-1.0.0.exe</small></span></a></div>
+          <p class="note">Follows the tempo of Four Tracker or your DAW. Installs into the VST3 folder you choose.</p>
         </div>
       </div>
     </div>
@@ -532,7 +547,10 @@ const SITE = {
   manual:   "Four-Tracker-User-Manual.pdf",
   // Breakbeat Processor (the separate effect): its installer on GitHub
   bbVersion:  "1.0.0",
-  bbDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/breakbeat-1.0.0/BreakbeatProcessor-Setup-1.0.0.exe"
+  bbDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/breakbeat-1.0.0/BreakbeatProcessor-Setup-1.0.0.exe",
+  // FX Processor (the separate effect): its installer on GitHub
+  fxVersion:  "1.0.0",
+  fxDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/fxprocessor-1.0.0/FxProcessor-Setup-1.0.0.exe"
 };
 /* ============================================================ */
 
@@ -548,6 +566,9 @@ const SITE = {
   document.querySelectorAll(".js-bb-version").forEach(el => el.textContent = "v" + SITE.bbVersion);
   document.querySelectorAll(".js-bb-filename").forEach(el => el.textContent = decodeURIComponent (SITE.bbDownload.split("/").pop()));
   document.querySelectorAll(".js-bb-download").forEach(el => SITE.bbDownload ? ext(el, SITE.bbDownload) : null);
+  document.querySelectorAll(".js-fx-version").forEach(el => el.textContent = "v" + SITE.fxVersion);
+  document.querySelectorAll(".js-fx-filename").forEach(el => el.textContent = decodeURIComponent (SITE.fxDownload.split("/").pop()));
+  document.querySelectorAll(".js-fx-download").forEach(el => SITE.fxDownload ? ext(el, SITE.fxDownload) : null);
   document.getElementById("year").textContent = String(new Date().getFullYear());
 
   /* ---- live keyboard map: C-2 = start/stop, C#2 up = patterns 00, 01, 02 ... ---- */

@@ -78,6 +78,7 @@ rem ---- JUCE ------------------------------------------------------------------
 rem  This script downloads nothing. Copy the JUCE folder from your Four Tracker
 rem  folder (the one build-windows.bat made there) into this folder.
 if exist "JUCE\CMakeLists.txt" goto :haveJuce
+if exist "..\JUCE\CMakeLists.txt" goto :haveJuce
 if exist "JUCE\JUCE-8.0.10\CMakeLists.txt" (
     move "JUCE\JUCE-8.0.10" "_juce_fix" >nul
     rmdir /s /q "JUCE"
