@@ -715,6 +715,10 @@ void InstrumentsPage::setSource (int source)
         in.makeMidi();
         st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW A MIDI INSTRUMENT - CHOOSE THE MIDI OUTPUT ON THE MIDI / AUDIO PAGE");
     }
+    else if (in.restoreSample())
+    {
+        st.setStatus ("SLOT " + hex2 (slot()) + " - THE SAMPLE " + in.name + " IS BACK");
+    }
     else
     {
         in.clear();

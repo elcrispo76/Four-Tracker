@@ -37,6 +37,12 @@ FourTrackerProcessor::FourTrackerProcessor()
             fx->process (ch, l, r, n);
         };
         engine.channelRoute = [this] (int ch) { return fx->getRoute (ch); };
+        engine.masterInsert = [this] (float* l, float* r, int n)
+        {
+            const auto& t = engine.insertTransport;
+            fx->setTransport ({ t.playing, t.bpm, t.ppq, t.samples });
+            fx->process (FxHost::kMaster, l, r, n);
+        };
     }
    #endif
 
@@ -52,6 +58,7 @@ FourTrackerProcessor::~FourTrackerProcessor()
    #if FOURTRACKER_FX_HOST
     engine.channelInsert = nullptr;
     engine.channelRoute = nullptr;
+    engine.masterInsert = nullptr;
     if (fx != nullptr) { fx->saveSettings(); fx.reset(); }
    #endif
 }
@@ -567,6 +574,8 @@ void FourTrackerProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.setProperty ("version", 1, nullptr);
     writeSong (root);
     root.setProperty ("midiBase", engine.midiBaseNote.load(), nullptr);
+    root.setProperty ("fadeNote", engine.midiFadeNote.load(), nullptr);
+    root.setProperty ("fadeBars", engine.fadeBars.load(), nullptr);
     root.setProperty ("midiChannel", engine.midiChannel.load(), nullptr);
     root.setProperty ("switchMode", engine.switchMode.load(), nullptr);
     root.setProperty ("followHost", engine.followHostTempo.load(), nullptr);
@@ -589,6 +598,8 @@ void FourTrackerProcessor::setStateInformation (const void* data, int sizeInByte
     const bool restoreSong = wrapperType != wrapperType_Standalone;
 
     engine.midiBaseNote = juce::jlimit (0, 127 - kMaxPatterns, (int) root.getProperty ("midiBase", 36));
+    engine.midiFadeNote = juce::jlimit (0, 127, (int) root.getProperty ("fadeNote", 84));
+    engine.fadeBars = juce::jlimit (1, 16, (int) root.getProperty ("fadeBars", 4));
     engine.midiChannel = juce::jlimit (0, 16, (int) root.getProperty ("midiChannel", 0));
     engine.switchMode = juce::jlimit (0, 3, (int) root.getProperty ("switchMode", 0));
     engine.followHostTempo = (bool) root.getProperty ("followHost", false);

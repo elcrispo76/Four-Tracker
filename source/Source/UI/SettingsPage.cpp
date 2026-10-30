@@ -19,6 +19,9 @@ SettingsPage::SettingsPage (EditorState& s) : st (s)
     addAndMakeVisible (channel);
     addAndMakeVisible (midiStartStop);
     addAndMakeVisible (master);
+    addAndMakeVisible (fadeNote);
+    addAndMakeVisible (fadeLearn);
+    addAndMakeVisible (fadeBars);
 
     baseNote.formatter = [] (int v) { return midiNoteName (v); };
     baseNote.parser = [] (const String& t, bool& ok)
@@ -40,12 +43,30 @@ SettingsPage::SettingsPage (EditorState& s) : st (s)
         return (oct + 1) * 12 + semi;
     };
     baseNote.setDragSensitivity (6.0f);
+    fadeNote.formatter = baseNote.formatter;
+    fadeNote.parser = baseNote.parser;
+    fadeNote.setDragSensitivity (6.0f);
+    fadeNote.onChange = [this] (int v) { st.engine().midiFadeNote = v; repaint(); };
+    fadeLearn.setClickingTogglesState (false);
+    fadeLearn.onClick = [this]
+    {
+        auto& e = st.engine();
+        e.midiLearn = false;
+        e.fadeLearn = ! e.fadeLearn.load();
+        fadeLearn.setToggleState (e.fadeLearn.load(), dontSendNotification);
+        repaint();
+    };
+    fadeBars.formatter = [] (int v) { return String (v) + (v == 1 ? " BAR" : " BARS"); };
+    fadeBars.parser = [] (const String& t, bool& ok) { ok = true; return t.getIntValue(); };
+    fadeBars.setDragSensitivity (10.0f);
+    fadeBars.onChange = [this] (int v) { st.engine().fadeBars = v; };
     baseNote.onChange = [this] (int v) { st.engine().midiBaseNote = v; repaint(); };
 
     learn.setClickingTogglesState (false);
     learn.onClick = [this]
     {
         auto& e = st.engine();
+        e.fadeLearn = false;
         e.midiLearn = ! e.midiLearn.load();
         learn.setToggleState (e.midiLearn.load(), dontSendNotification);
     };
@@ -113,6 +134,15 @@ void SettingsPage::refresh()
     channel.setValue (e.midiChannel.load());
     midiStartStop.setState (e.respondToMidiStartStop.load());
     master.setValue (e.masterVolume.load());
+    fadeNote.setValue (e.midiFadeNote.load());
+    fadeBars.setValue (e.fadeBars.load());
+    const bool fadeLearning = e.fadeLearn.load();
+    fadeLearn.setToggleState (fadeLearning, dontSendNotification);
+    if (fadeLearning != lastFadeLearn || e.midiFadeNote.load() != lastFadeNote)
+    {
+        lastFadeLearn = fadeLearning; lastFadeNote = e.midiFadeNote.load();
+        repaint();
+    }
     followHost.setState (e.followHostTempo.load());
     updateModeButtons();
 
@@ -164,18 +194,24 @@ void SettingsPage::paint (Graphics& g)
     {
         const int note = base + i;
         if (note > 127) break;
-        const String what = i == 0 ? String ("START/STOP") : "PATTERN " + formatNumber (i - 1, 2, st.hex());
+        const String what = i == 0 ? String ("START/STOP")
+                          : note == e.midiFadeNote.load() ? String ("FADE OUT")
+                          : "PATTERN " + formatNumber (i - 1, 2, st.hex());
         const int col = i / perCol, row = i % perCol;
         auto r = Rectangle<float> (inner.getX() + col * colW, inner.getY() + row * 24.0f, colW, 22.0f);
         const auto c = note == lastN ? Theme::accent : (i == 0 ? Theme::screenText : Theme::screenDim);
         Theme::text (g, midiNoteName (note), r.withWidth (44.0f), 14.0f, c, Justification::centredLeft);
         Theme::text (g, what, r.withTrimmedLeft (50.0f), 14.0f, c, Justification::centredLeft);
     }
-    Theme::text (g, "... UP TO PATTERN " + formatNumber (kMaxPatterns - 1, 2, st.hex()) + " ON " + midiNoteName (base + kMaxPatterns),
+    Theme::text (g, "... UP TO PATTERN " + formatNumber (kMaxPatterns - 1, 2, st.hex()) + " ON " + midiNoteName (base + kMaxPatterns)
+                      + "   FADE OUT ON " + midiNoteName (e.midiFadeNote.load()),
                  { inner.getX(), inner.getBottom() - 18.0f, inner.getWidth(), 18.0f }, 15.0f, Theme::screenDim, Justification::centredLeft);
 
     // audio side
     Theme::text (g, "MASTER", { (float) audioPanel.getX() + 20.0f, (float) master.getY(), 140.0f, (float) master.getHeight() }, 18.0f, ink, Justification::centredLeft);
+    Theme::text (g, "FADE OUT", { (float) fadeNote.getX() - 132.0f, (float) fadeNote.getY(), 128.0f, (float) fadeNote.getHeight() }, 18.0f, ink, Justification::centredLeft);
+    if (e.fadeLearn.load())
+        Theme::text (g, "PRESS A KEY FOR FADE OUT...", { (float) fadeNote.getX(), (float) fadeNote.getBottom() + 2.0f, 400.0f, 14.0f }, 13.0f, ink, Justification::centredLeft);
 
     if (! isStandalone)
     {
@@ -212,6 +248,9 @@ void SettingsPage::resized()
     mapBox = { 14, 400, 612, getHeight() - 414 };
 
     master.setBounds (audioPanel.getX() + 170, 66, 140, 46);
+    fadeNote.setBounds (audioPanel.getX() + 462, 66, 112, 46);
+    fadeLearn.setBounds (audioPanel.getX() + 582, 66, 104, 46);
+    fadeBars.setBounds (audioPanel.getX() + 694, 66, audioPanel.getWidth() - 712, 46);
     if (deviceSelector != nullptr)
         deviceSelector->setBounds (audioPanel.getX() + 20, 130, audioPanel.getWidth() - 40, getHeight() - 150);
     followHost.setBounds (audioPanel.getX() + 300, 340, 200, 46);

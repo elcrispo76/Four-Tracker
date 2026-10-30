@@ -18,6 +18,7 @@ void TrackerEngine::prepare (double sampleRate, int maxBlockSize)
 {
     sr = sampleRate > 0 ? sampleRate : 44100.0;
     chanScratchSize = juce::jmax (4096, maxBlockSize);
+    fadeBuf.assign ((size_t) chanScratchSize, 1.0f);
     midiOut.ensureSize (8192);
     chanScratch.assign ((size_t) (kNumChannels * 2 * chanScratchSize), 0.0f);
     smoothCoeff = (float) (1.0 - std::exp (-1.0 / (0.0015 * sr)));
@@ -170,6 +171,11 @@ void TrackerEngine::handleMidi (const juce::MidiMessage& m)
     const int note = m.getNoteNumber();
     lastMidiNote = note;
 
+    if (fadeLearn.exchange (false))
+    {
+        midiFadeNote = note;
+        return;
+    }
     if (midiLearn.exchange (false))
     {
         midiBaseNote = juce::jlimit (0, 127 - kMaxPatterns, note);
@@ -177,6 +183,11 @@ void TrackerEngine::handleMidi (const juce::MidiMessage& m)
     }
 
     const int base = midiBaseNote.load();
+    if (note == midiFadeNote.load() && note != base)
+    {
+        toggleFade();                      // the fade key wins over a pattern key on the same note
+        return;
+    }
     if (note == base)
     {
         if (playing) stopPlayback(); else startPlayback();
@@ -251,6 +262,7 @@ void TrackerEngine::resetChannels (bool keepVoices)
 void TrackerEngine::startPlayback()
 {
     lfoClock = 0.0;     // SYNTH 2's tempo LFO starts with the pattern
+    fadeGain = 1.0; fadeRate = 0.0; fadeRestoreIn = 0; fadeStateNow = fadeNone;
     insertBase = 0.0;   // and so does the song position the effects see
     insertLastRow = 0.0;
     insertSamples = 0;
@@ -272,8 +284,25 @@ void TrackerEngine::startPlayback()
     playing = true;
 }
 
+void TrackerEngine::toggleFade()
+{
+    if (! playing.load()) return;
+    const int spd = juce::jmax (1, speed.load());
+    const double beatsPerSecond = sr * 2.5 / samplesPerTick() * 6.0 / spd / 60.0;
+    const double seconds = juce::jlimit (1, 16, fadeBars.load()) * 4.0 / juce::jmax (0.1, beatsPerSecond);
+    const double step = 1.0 / juce::jmax (1.0, seconds * sr);       // full fade in FADE bars
+    fadeRestoreIn = 0;
+    // fading out, or silent: fade (back) in. Otherwise (full, or fading in): fade out.
+    if (fadeRate < 0.0 || (fadeRate == 0.0 && fadeGain < 1.0)) { fadeRate = step;  fadeStateNow = fadeInRunning; }
+    else                                                        { fadeRate = -step; fadeStateNow = fadeOutRunning; }
+}
+
 void TrackerEngine::stopPlayback()
 {
+    // a fade that was running: keep its level a moment while the voices die away, then back to full
+    if (fadeGain < 1.0 && fadeRestoreIn <= 0) fadeRestoreIn = (int) (sr * 0.1);
+    fadeRate = 0.0;
+    fadeStateNow = fadeNone;
     playing = false;
     queuedPattern = -1;
     for (auto& cs : chans) { fadeOutVoice (cs.voice); fadeOutVoice (cs.ghost); midiNoteOff (cs.midiNote, cs.midiChan); }
@@ -1467,6 +1496,9 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
             }
     }
 
+    // the master effects, on the whole mix
+    if (masterInsert != nullptr) masterInsert (L, R, n);
+
     if (playing.load())
     {
         if (playingAtStart) insertSamples += n;
@@ -1474,6 +1506,30 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
 
     // master gain + soft knee limiter so four loud channels never clip hard
     const float master = (float) masterVolume.load() / 100.0f * 0.7f;
+    if (fadeRequest.exchange (false)) toggleFade();
+    // FADE OUT: a gain that runs down to 0 (then STOP), or back up when the key is pressed again
+    const bool fadeActive = fadeRate != 0.0 || fadeGain < 1.0;
+    const int fadeN = juce::jmin (n, (int) fadeBuf.size());
+    auto fadeAt = [&] (int i) -> float
+    {
+        if (! fadeActive) return 1.0f;
+        return i < fadeN ? fadeBuf[(size_t) i] : (float) fadeGain;
+    };
+    if (fadeActive)
+    {
+        for (int i = 0; i < fadeN; ++i)
+        {
+            if (fadeRestoreIn > 0) { if (--fadeRestoreIn == 0) fadeGain = 1.0; }
+            else
+            {
+                fadeGain += fadeRate;
+                if (fadeRate < 0.0 && fadeGain <= 0.0) { fadeGain = 0.0; fadeRate = 0.0; fadeStateNow = fadeSilent; }   // stays silent
+                if (fadeRate > 0.0 && fadeGain >= 1.0) { fadeGain = 1.0; fadeRate = 0.0; fadeStateNow = fadeNone; }
+            }
+            fadeBuf[i] = (float) fadeGain;
+        }
+    }
+    fadeLevel = (float) fadeGain;
     auto shape = [] (float x)
     {
         const float a = std::abs (x);
@@ -1482,12 +1538,13 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
     };
     if (out.getNumChannels() > 1)
     {
-        for (int i = 0; i < n; ++i) { L[i] = shape (L[i] * master); R[i] = shape (R[i] * master); }
+        for (int i = 0; i < n; ++i) { const float g = master * fadeAt (i); L[i] = shape (L[i] * g); R[i] = shape (R[i] * g); }
     }
     else
     {
-        for (int i = 0; i < n; ++i) L[i] = shape (0.5f * (L[i] + R[i]) * master);
+        for (int i = 0; i < n; ++i) L[i] = shape (0.5f * (L[i] + R[i]) * master * fadeAt (i));
     }
+
 
     if (previewVoice.active && previewVoice.inst != nullptr)
         previewPosition = previewVoice.inst->physicalIndex ((int) previewVoice.pos);

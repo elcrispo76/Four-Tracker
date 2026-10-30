@@ -28,11 +28,15 @@ private:
     std::array<std::unique_ptr<PixelButton>, 4> modeButtons;
     SegmentPair midiStartStop { "ON", "OFF", 17.0f };
     ValueBox master { 0, 100, 80, 24.0f };
+    ValueBox fadeNote { 0, 127, 84, 24.0f };
+    PixelButton fadeLearn { "LEARN", PixelButton::Style::Segment, 17.0f };
+    ValueBox fadeBars { 1, 16, 4, 20.0f };
     SegmentPair followHost { "ON", "OFF", 17.0f };
 
     std::unique_ptr<juce::LookAndFeel_V4> deviceLnf;
     std::unique_ptr<juce::AudioDeviceSelectorComponent> deviceSelector;
     bool isStandalone = false;
     int lastNote = -2, lastBase = -1;
-    bool lastLearn = false;
+    bool lastLearn = false, lastFadeLearn = false;
+    int lastFadeNote = -1;
 };

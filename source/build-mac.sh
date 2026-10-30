@@ -2,7 +2,7 @@
 # ===========================================================================
 #  Four Tracker - Mac build (Apple Silicon + Intel in one, macOS 11 or newer)
 #
-#  Makes: Four Tracker.app        (the program, with Audio Unit effects: 2 per track)
+#  Makes: Four Tracker.app        (the program, with Audio Unit effects: 3 per track)
 #         Four Tracker.component  (the Audio Unit instrument for Logic, Live, GarageBand ...)
 #  and a disk image dist-mac/FourTracker-<version>-mac.dmg to share.
 #
@@ -98,7 +98,7 @@ THE FIRST TIME
       xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Four Tracker.component"
 
 EFFECTS
-  The program can use your Audio Unit effects: 2 per track, plus chaining.
+  The program can use your Audio Unit effects: 3 per track, plus chaining.
   Press FX (or F8), then SCAN. Your keyboard's F-keys may need the fn key.
 
 Beta software: expect bugs, save your modules often, and use it at your own risk.

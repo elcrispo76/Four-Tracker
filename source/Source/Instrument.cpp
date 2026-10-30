@@ -89,8 +89,26 @@ int synthParamFromMidi (int param, int midiValue)
     }
 }
 
+void Instrument::keepSample()
+{
+    if (isEmpty() || params.synth || params.synth2 || params.midi) return;
+    auto copy = std::make_shared<Instrument> (*this);
+    copy->keptSample.reset();
+    keptSample = std::move (copy);
+}
+
+bool Instrument::restoreSample()
+{
+    if (keptSample == nullptr) return false;
+    auto k = keptSample;
+    *this = *k;
+    keptSample.reset();
+    return true;
+}
+
 void Instrument::makeSynth (int wave)
 {
+    keepSample();
     wave = juce::jlimit (0, (int) numSynthWaves - 1, wave);
     const bool wasSynth = isSynth();
     const auto oldAutoName = wasSynth ? juce::String ("SYNTH ") + synthWaveName (params.synthWave) : juce::String();
@@ -142,6 +160,7 @@ void Instrument::makeSynth (int wave)
 
 void Instrument::makeSynth2()
 {
+    keepSample();
     if (isSynth2()) return;
     const int vol = isEmpty() ? 64 : params.volume;
     // One saw cycle at the same rate as SYNTH 1, so the tracker's pitch
@@ -176,6 +195,7 @@ void Instrument::applySynth2Patch (const synth2::Patch& patch)
 
 void Instrument::makeMidi()
 {
+    keepSample();
     const bool was = isMidi();
     const auto oldName = was ? "MIDI CH " + juce::String (params.midiChannel) : juce::String();
     const int ch = was ? params.midiChannel : 1, prog = was ? params.midiProgram : 0;
@@ -440,6 +460,7 @@ bool Instrument::reverseRange (int from, int to)
 
 juce::String Instrument::loadFromFile (const juce::File& file, juce::AudioFormatManager& formats)
 {
+    keptSample.reset();          // a new sample: the old kept one is gone
     // ---- Amiga formats (ProTracker / OctaMED): IFF 8SVX and raw 8-bit ----
     auto useAmiga = [&] (const amiga::Decoded& dec) -> juce::String
     {

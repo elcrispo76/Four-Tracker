@@ -40,7 +40,7 @@ namespace fxui
 
     String applyChoice (FxHost& fx, const Array<PluginDescription>& effects, int c, int i, int id)
     {
-        const String slotName = "CH" + String (c + 1) + " FX" + String (i + 1);
+        const String slotName = FxHost::channelName (c) + " FX" + String (i + 1);
         if (id == kEmptyId || id == 0)
         {
             fx.clearSlot (c, i);
@@ -59,7 +59,7 @@ namespace fxui
 
 FxPage::FxPage (EditorState& s, FxHost& host) : st (s), fx (host)
 {
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    for (int c = 0; c < FxHost::kNumFxChannels; ++c)
         for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
         {
             auto u = std::make_unique<SlotUI>();
@@ -154,7 +154,7 @@ void FxPage::refillLists()
 {
     effects = fx.getEffects();
     const ScopedValueSetter<bool> svs (refilling, true);
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    for (int c = 0; c < FxHost::kNumFxChannels; ++c)
         for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
             fxui::fillBox (ui[(size_t) c][(size_t) i]->box, fx, effects, c, i, true);
 }
@@ -170,7 +170,7 @@ void FxPage::chosen (int c, int i)
 
 void FxPage::updateButtons()
 {
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    for (int c = 0; c < FxHost::kNumFxChannels; ++c)
         for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
         {
             auto& u = *ui[(size_t) c][(size_t) i];
@@ -201,7 +201,7 @@ void FxPage::paint (Graphics& g)
    #else
     Theme::text (g, "VST EFFECTS", { 22.0f, 14.0f, 600.0f, 34.0f }, 30.0f, Theme::ink, Justification::centredLeft, true);
    #endif
-    Theme::text (g, "TWO EFFECTS PER CHANNEL - LOADS " + fx.getFormatNames().toUpperCase() + " - "
+    Theme::text (g, "THREE EFFECTS PER CHANNEL AND ON THE MASTER - LOADS " + fx.getFormatNames().toUpperCase() + " - "
                     + String ((int) sizeof (void*) * 8) + "-BIT", { 420.0f, 18.0f, 1060.0f, 28.0f }, 16.0f,
                  Theme::ink.withAlpha (0.7f), Justification::centredLeft);
 
@@ -251,15 +251,16 @@ void FxPage::paint (Graphics& g)
         g.restoreState();
     }
 
-    // channel rows
-    const int rowH = rowsArea.getHeight() / ft::kVisibleChannels;
-    for (int v = 0; v < ft::kVisibleChannels; ++v)
+    // channel rows, then the MASTER row (effects on the whole mix)
+    const int rowH = rowsArea.getHeight() / (ft::kVisibleChannels + 1);
+    for (int v = 0; v <= ft::kVisibleChannels; ++v)
     {
-        const int c = firstCh + v;
-        if (c >= usedCh) break;
+        const bool isMaster = v == ft::kVisibleChannels;
+        const int c = isMaster ? FxHost::kMaster : firstCh + v;
+        if (! isMaster && c >= usedCh) continue;
         auto row = Rectangle<int> (rowsArea.getX(), rowsArea.getY() + v * rowH, rowsArea.getWidth(), rowH - 10);
-        Theme::drawRaised (g, row.toFloat(), Theme::panel.brighter (0.06f));
-        Theme::text (g, "CH" + String (c + 1), row.toFloat().withWidth (110.0f).withTrimmedLeft (18.0f), 28.0f, Theme::ink,
+        Theme::drawRaised (g, row.toFloat(), isMaster ? Theme::panel.darker (0.08f) : Theme::panel.brighter (0.06f));
+        Theme::text (g, FxHost::channelName (c), row.toFloat().withWidth (116.0f).withTrimmedLeft (18.0f), isMaster ? 16.0f : 28.0f, Theme::ink,
                      Justification::centredLeft, true);
         for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
         {
@@ -269,7 +270,7 @@ void FxPage::paint (Graphics& g)
         }
     }
 
-    Theme::text (g, "A 64-BIT FOUR TRACKER LOADS 64-BIT PLUGINS ONLY. EFFECTS AND THEIR SETTINGS ARE REMEMBERED.   F8 / ESC = CLOSE",
+    Theme::text (g, "MASTER = EFFECTS ON THE WHOLE MIX.  64-BIT LOADS 64-BIT PLUGINS ONLY.  EFFECTS ARE REMEMBERED.  F8 / ESC = CLOSE",
                  { 22.0f, (float) getHeight() - 44.0f, 1200.0f, 26.0f }, 15.0f, Theme::ink.withAlpha (0.75f));
 }
 
@@ -291,14 +292,16 @@ void FxPage::resized()
     statusBox = { 22, folderBox.getBottom() + 12, getWidth() - 44, 48 };
 
     rowsArea = { 22, statusBox.getBottom() + 18, getWidth() - 44, getHeight() - statusBox.getBottom() - 18 - 140 };
-    // the 4 channels in view (the same ones as on the tracks page)
-    const int rowH = rowsArea.getHeight() / ft::kVisibleChannels;
+    // the 4 channels in view (the same ones as on the tracks page), and the master under them
+    const int rowH = rowsArea.getHeight() / (ft::kVisibleChannels + 1);
     const int groupW = (rowsArea.getWidth() - 120) / FxHost::kSlotsPerChannel;
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    const int boxH = jmin (52, rowH - 18);
+    for (int c = 0; c < FxHost::kNumFxChannels; ++c)
     {
-        const int v = c - firstCh;
-        const bool shown = v >= 0 && v < ft::kVisibleChannels && c < usedCh;
-        const int y = rowsArea.getY() + v * rowH + (rowH - 10 - 52) / 2;
+        const bool isMaster = c == FxHost::kMaster;
+        const int v = isMaster ? ft::kVisibleChannels : c - firstCh;
+        const bool shown = isMaster || (v >= 0 && v < ft::kVisibleChannels && c < usedCh);
+        const int y = rowsArea.getY() + v * rowH + (rowH - 10 - boxH) / 2;
         for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
         {
             auto& u = *ui[(size_t) c][(size_t) i];
@@ -306,16 +309,16 @@ void FxPage::resized()
             if (! shown) continue;
             const int x = rowsArea.getX() + 120 + i * groupW + 54;
             const int w = groupW - 54 - 20;
-            u.box.setBounds (x, y, w - 2 * 112, 52);
-            u.edit.setBounds (x + w - 2 * 112 + 8, y, 100, 52);
-            u.bypass.setBounds (x + w - 112 + 8, y, 100, 52);
+            u.box.setBounds (x, y, w - 2 * 112, boxH);
+            u.edit.setBounds (x + w - 2 * 112 + 8, y, 100, boxH);
+            u.bypass.setBounds (x + w - 112 + 8, y, 100, boxH);
         }
     }
     closeBtn.setBounds (getWidth() - 22 - 220, getHeight() - 122, 220, 66);
 }
 
 // ===========================================================================
-// FxBar: the two effect lists under each channel strip on the tracks page
+// FxBar: the effect lists (FX1-FX3) under each channel strip on the tracks page
 // ===========================================================================
 
 FxBar::FxBar (FxHost& host) : fx (host)
@@ -340,7 +343,7 @@ FxBar::FxBar (FxHost& host) : fx (host)
             addAndMakeVisible (*b);
 
             auto& e = edits[(size_t) c][(size_t) i];
-            e = std::make_unique<PixelButton> ("E", PixelButton::Style::Raised, 15.0f);
+            e = std::make_unique<PixelButton> ("E", PixelButton::Style::Raised, FxHost::kSlotsPerChannel > 2 ? 11.0f : 15.0f);
             e->setWantsKeyboardFocus (false);
             e->setMouseClickGrabsKeyboardFocus (false);
             e->onClick = [this, c, i] { fx.showEditor (c, i); };
@@ -348,7 +351,7 @@ FxBar::FxBar (FxHost& host) : fx (host)
 
             // ON (lit) / OFF (dark) = bypass
             auto& by = bypasses[(size_t) c][(size_t) i];
-            by = std::make_unique<PixelButton> ("ON", PixelButton::Style::Segment, 13.0f);
+            by = std::make_unique<PixelButton> ("ON", PixelButton::Style::Segment, FxHost::kSlotsPerChannel > 2 ? 10.0f : 13.0f);
             by->setWantsKeyboardFocus (false);
             by->setMouseClickGrabsKeyboardFocus (false);
             by->onClick = [this, c, i] { fx.setBypass (c, i, ! fx.isBypassed (c, i)); refill(); done(); };
@@ -389,7 +392,9 @@ void FxBar::refill()
             }
             by.setButtonText (has && ! on ? "OFF" : "ON");
             by.setToggleState (on, dontSendNotification);
-            if (! has) boxes[(size_t) c][(size_t) i]->setSelectedId (0, dontSendNotification);   // shows "FX1" / "FX2"
+            if (! has) boxes[(size_t) c][(size_t) i]->setSelectedId (0, dontSendNotification);   // shows "FX1" / "FX2" / "FX3"
+            boxes[(size_t) c][(size_t) i]->setTooltip ("CH" + String (c + 1) + " FX" + String (i + 1)
+                                                       + (has ? ": " + fx.getSlotName (c, i) : String (" (empty)")));
         }
 }
 
@@ -423,14 +428,27 @@ void FxBar::resized()
                 comp->setVisible (shown);
         if (! shown) continue;
         auto r = Rectangle<int> (v * (w + gap), 0, w, getHeight()).reduced (inner, 5);
-        const int half = (r.getWidth() - inner) / 2;
-        for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
+        constexpr int n = FxHost::kSlotsPerChannel;
+        const int cellW = (r.getWidth() - inner * (n - 1)) / n;
+        for (int i = 0; i < n; ++i)
         {
-            auto cell = r.removeFromLeft (half);
-            if (i == 0) r.removeFromLeft (inner);
-            bypasses[(size_t) c][(size_t) i]->setBounds (cell.removeFromRight (bw));
-            cell.removeFromRight (2);
-            edits[(size_t) c][(size_t) i]->setBounds (cell.removeFromRight (ew));
+            auto cell = r.removeFromLeft (cellW);
+            if (i < n - 1) r.removeFromLeft (inner);
+            if (n <= 2)
+            {
+                bypasses[(size_t) c][(size_t) i]->setBounds (cell.removeFromRight (bw));
+                cell.removeFromRight (2);
+                edits[(size_t) c][(size_t) i]->setBounds (cell.removeFromRight (ew));
+            }
+            else
+            {
+                // three effects per track: E over ON, so the list keeps room for the name
+                auto buttons = cell.removeFromRight (34);
+                const int bh = (buttons.getHeight() - 2) / 2;
+                edits[(size_t) c][(size_t) i]->setBounds (buttons.removeFromTop (bh));
+                buttons.removeFromTop (2);
+                bypasses[(size_t) c][(size_t) i]->setBounds (buttons);
+            }
             cell.removeFromRight (2);
             boxes[(size_t) c][(size_t) i]->setBounds (cell);
         }

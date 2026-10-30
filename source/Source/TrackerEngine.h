@@ -83,6 +83,17 @@ public:
     std::atomic<int>  switchMode     { (int) SwitchMode::LegatoNextRow };
     std::atomic<bool> followHostTempo{ false };
     std::atomic<bool> midiLearn      { false };
+    // FADE key: fades all tracks out over fadeBars bars; they stay silent (still playing) until the key is
+    // pressed again, which fades them back in over the same time. Pressed while fading, it turns round.
+    // STOP / START bring the full volume back. Default C-6 (MIDI 84), LEARN moves it.
+    std::atomic<int>  midiFadeNote   { 84 };
+    std::atomic<bool> fadeLearn      { false };
+    std::atomic<int>  fadeBars       { 4 };      // 1..16 bars (4 rows to a beat)
+    std::atomic<float> fadeLevel     { 1.0f };   // for the screen: 1 = not fading
+    std::atomic<bool> fadeRequest    { false };  // the same as the key, from the screen
+    enum FadeState { fadeNone = 0, fadeOutRunning = 1, fadeSilent = 2, fadeInRunning = 3 };
+    int  getFadeState() const noexcept { return fadeStateNow.load(); }
+    bool isFading() const noexcept { return fadeStateNow.load() != fadeNone; }
     std::atomic<bool> respondToMidiStartStop { true };   // MIDI clock Start/Stop messages
     std::atomic<int>  masterVolume   { 80 };     // 0..100
     std::atomic<int>  numChannels    { 4 };      // channels in use: 4, 8 or 16
@@ -110,6 +121,9 @@ public:
     /** Optional chaining (with channelInsert): the channel whose effects this channel's sound
         goes on into after its own, or -1 for straight out. Loops are ignored. */
     std::function<int (int channel)> channelRoute;
+    /** Optional master insert (VST effects on the whole mix in the FX build): runs on the
+        mixed stereo sound on the audio thread, before MASTER volume, FADE OUT and the limiter. */
+    std::function<void (float* left, float* right, int numSamples)> masterInsert;
 
     /** The song position the channel effects see during channelInsert (tempo-synced effects).
         BPM is the musical tempo: 4 rows to a beat, so SPEED 6 at 125 = 125 BPM, SPEED 3 = 250.
@@ -283,6 +297,11 @@ private:
     double sr = 44100.0;
     double samplesToNextTick = 0.0;
     double currentHostBpm = -1.0;
+    double fadeGain = 1.0, fadeRate = 0.0;
+    std::vector<float> fadeBuf;
+    int fadeRestoreIn = 0;
+    std::atomic<int> fadeStateNow { 0 };
+    void toggleFade();
     double insertBase = 0.0;              // beats at the top of the playing pattern (multiple of 16)
     double insertLastRow = 0.0;
     juce::int64 insertSamples = 0;

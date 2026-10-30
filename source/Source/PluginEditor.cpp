@@ -42,6 +42,11 @@ FourTrackerEditor::FourTrackerEditor (FourTrackerProcessor& p)
 
     root.addChildComponent (sampleBrowser);
     root.addAndMakeVisible (trackCount);
+    root.addAndMakeVisible (masterVolume);
+    masterVolume.getValue = [this] { return state.engine().masterVolume.load(); };
+    masterVolume.setValue = [this] (int v) { state.engine().masterVolume = v; };
+    masterVolume.getFade  = [this] { return state.engine().fadeLevel.load(); };
+    masterVolume.getFadeState = [this] { return state.engine().getFadeState(); };
     root.addChildComponent (trackNav);
     trackNav.onPage = [this] (int pageIndex)
     {
@@ -129,7 +134,8 @@ void FourTrackerEditor::resized()
        #endif
         const int right = fxBuild ? 1330 : 1446;
         trackCount.setBounds (right - 196, 18, 196, 50);
-        title.rightReserve = (float) (1456 - trackCount.getX() + 10);
+        masterVolume.setBounds (trackCount.getX() - 206, 18, 196, 50);
+        title.rightReserve = (float) (1456 - masterVolume.getX() + 10);
     }
    #if FOURTRACKER_FX_HOST
     if (fxPage != nullptr) fxPage->setBounds (14, 84, 1508, 844);

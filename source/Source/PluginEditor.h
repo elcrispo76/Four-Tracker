@@ -14,6 +14,7 @@
 #include "UI/SampleBrowser.h"
 #include "UI/FxPage.h"
 #include "UI/TrackCount.h"
+#include "UI/MasterVolume.h"
 #include "UI/TrackNav.h"
 
 /** Everything is laid out in the 1536 x 1024 coordinates of the mockups
@@ -67,6 +68,7 @@ private:
     SettingsPage settingsPage;
     SampleBrowser sampleBrowser;
     TrackCount trackCount;                   // - TRACKS n + in the title bar
+    MasterVolume masterVolume;               // - MASTER 80 + in the title bar
     TrackNav trackNav;                       // < 1-4 5-8 ... > under the pattern (more than 4 tracks)
     int removeTrackAsked = -1;               // a track with notes: press - twice
     void addTrack();

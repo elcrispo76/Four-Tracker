@@ -190,6 +190,7 @@ void PatternView::mouseDown (const MouseEvent& e)
         st.anchorRow = r; st.anchorCh = c;
         st.cursorRow = r; st.cursorCh = c; st.cursorCol = col;
     }
+    followInstrument();
     st.changed();
     repaint();
 }
@@ -208,6 +209,15 @@ void PatternView::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)
 {
     if (st.engine().playing) return;
     setCursorRow (st.cursorRow + (w.deltaY > 0 ? -4 : 4), false);
+}
+
+void PatternView::followInstrument()
+{
+    // like OpenMPT's "auto-select instrument": the instrument under the cursor becomes the current one
+    if (st.cursorRow < 0 || st.cursorRow >= numRows() || st.cursorCh < 0 || st.cursorCh >= kNumChannels) return;
+    const int inst = pattern().at (st.cursorRow, st.cursorCh).inst;
+    if (inst > 0 && inst < kNumInstruments && inst != st.proc.selectedInstrument)
+        st.proc.selectedInstrument = inst;
 }
 
 void PatternView::updateSelectionFromAnchor()
@@ -231,6 +241,7 @@ void PatternView::setCursorRow (int r, bool extend)
     if (extend && ! st.hasSelection) { st.anchorRow = st.cursorRow; st.anchorCh = st.cursorCh; }
     st.cursorRow = ((r % rows) + rows) % rows;
     if (extend) updateSelectionFromAnchor();
+    followInstrument();
     st.changed();
     repaint();
 }
@@ -253,6 +264,7 @@ void PatternView::moveCursor (int dRow, int dCol, bool extend)
             st.cursorCh = c / 7;
             st.cursorCol = c % 7;
         }
+        followInstrument();
         st.changed();
         repaint();
     }

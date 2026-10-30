@@ -9,6 +9,10 @@ The code is C++ with JUCE 8.
 > test program in `Tests/`, but only a few people have used it so far. Expect bugs, save often, use at your own risk.
 > Road to 1.0: alpha → **beta (now)** → release candidate (fixes only) → 1.0 gold. Report bugs on GitHub Issues.
 
+## Master volume
+
+**MASTER** in the title bar (next to TRACKS) is the volume of all tracks together, 0-100, on every page: click - / +, drag the number, use the mouse wheel, or double-click for 80. During a fade it says FADE OUT, FADED OUT or FADE IN and shows the level. It is the same as MASTER on the MIDI / AUDIO page and is saved with the module.
+
 ## Tracks: 1 to 16
 
 The title bar has **- TRACKS n +**. **+** adds one track (channel) at a time, up to 16, and jumps to it; **-**
@@ -54,6 +58,7 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 | **D-2** | Pattern 01 |
 | **D#2** | Pattern 02 |
 | ... | ... one key per pattern, up to pattern 3F (63) |
+| **C-6** (MIDI 84) | **Fade**: all tracks fade out over FADE bars (1-16, default 4) and stay silent while the song keeps playing. Press it again to fade back in over the same time (also half way through a fade). STOP / START bring the full volume back. |
 
 - When stopped, a pattern key selects the pattern that C-2 will start. Pattern 00 is selected by default.
 - When playing, a pattern key switches pattern **without restarting**. Playback carries on from the next row at
@@ -61,6 +66,8 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 - The on-screen START / STOP (Song / Pattern page), Enter, and the pattern PREV / NEXT buttons do the same as the keys.
 - In the **MIDI / AUDIO** page you can:
   - move the start/stop key (LEARN, then press a key),
+  - move the fade out key (FADE OUT LEARN, then press a key) and set how many bars the fade lasts. The fade key
+    wins over a pattern key on the same note (C-6 would otherwise be pattern 2F),
   - pick a MIDI channel (or OMNI),
   - choose how a switch takes over:
     - **Next row (legato)**: the default
@@ -83,7 +90,7 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 | Enter | Start / stop pattern |
 | Esc | Stop |
 | Space, or the red **EDIT** button | Edit mode on/off. The button is lit red while editing. When off (the default), note keys only play the selected instrument and nothing is written into the pattern. |
-| Arrows, Tab / Shift+Tab, PgUp/PgDn, Home/End | Move the cursor |
+| Arrows, Tab / Shift+Tab, PgUp/PgDn, Home/End | Move the cursor. On a cell with an instrument number, that instrument becomes the selected one (auto-select instrument). |
 | Z S X D C V G B H N J M , L . | Notes (lower octave) |
 | Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P | Notes (upper octave) |
 | (holding a note key) | Plays the sample once: holding does not retrigger it. A sample without a loop plays to its end even if you let go; a looped sample keeps looping while held and stops when you let go. |
@@ -197,7 +204,7 @@ Any instrument slot can be a small synth instead of a sample. On the Instruments
   slider only: learning a knob that was already in use takes it away from the old slider. Right-click → **FORGET
   KNOB** removes it. The knobs listen on the MIDI CHANNEL set on the MIDI / AUDIO page, and are saved in the module.
 - Sliders: click or drag, mouse wheel for fine steps, double-click resets.
-- Setting SOURCE back to SAMPLE clears the slot so you can load a sample.
+- Setting SOURCE back to SAMPLE brings back the sample the slot had before it became a synth or MIDI (as long as no other sample was loaded); a slot that never had one is cleared so you can load a sample.
 - Synth settings are saved in modules and in DAW projects.
 
 ## SYNTH 2 (2 oscillators, LFO, FX, patches)
@@ -267,7 +274,7 @@ plays the patterns through MIDI, checks the switching and saves a WAV.
 
 ## FX version (VST effects)
 
-The FX version of the standalone app can load VST effects: **two effects per channel**, plus chaining. There are two:
+The FX version of the standalone app can load VST effects: **three effects per channel** (FX1, FX2, FX3), **three on the master** (the whole mix), plus chaining. There are two:
 
 | Build script | Folder | Effects | Share it? |
 |---|---|---|---|
@@ -280,11 +287,13 @@ only load in the personal FX version.
 - Press **FX** in the title bar (or **F8**) to open the VST EFFECTS page.
 - **ADD FOLDER** adds a folder with plugins (sub-folders are searched too). The standard VST3 folder is there from the start.
   **SCAN** finds all effects in the folders. Instruments are left out.
-- Under each channel strip on the tracks page there are two small drop-down lists, **FX1** and **FX2**, each with
+- Under each channel strip on the tracks page there are three small drop-down lists, **FX1**, **FX2** and **FX3**, each with
   an **E** button (opens the effect's window) and an **ON / OFF** button (bypass). The lists don't keep the
   keyboard, so Enter still starts and stops the pattern after you pick an effect. The same lists are on the FX page.
-- Each channel has two drop-down lists, **FX1** and **FX2**. The sound goes through FX1, then FX2.
+- Each channel has three drop-down lists, **FX1**, **FX2** and **FX3**. The sound goes through FX1, then FX2, then FX3.
   **EDIT** opens the effect's own window and **ON / BYPASS** switches it on and off.
+- **MASTER** (the last row on the FX page): three effects on the whole mix, e.g. a compressor, an EQ or a limiter
+  over the whole song. They come after all the channels (and their chaining), before MASTER volume and FADE OUT.
 - **Chaining:** under the pattern on the tracks page each channel has a list **CHn > OUT** /
   **CHn > INTO CHx FX**. Pick e.g. **CH2 > INTO CH1 FX** and CH2's sound (after CH2's own effects) goes on
   through CH1's effects, so one reverb or delay can be shared by several tracks. Chains can be longer
@@ -298,7 +307,7 @@ only load in the personal FX version.
 
 ## Mac version (Audio Unit)
 
-`build-mac.sh` builds the Mac version: **Four Tracker.app** (with Audio Unit effects, 2 per track, and chaining)
+`build-mac.sh` builds the Mac version: **Four Tracker.app** (with Audio Unit effects, 3 per track, and chaining)
 and **Four Tracker.component** (the Audio Unit instrument for Logic, Live, GarageBand, Reaper ...). One build runs
 on Apple Silicon and Intel Macs, macOS 11 or newer. There is no VST3 or VST2 on the Mac version.
 
@@ -318,10 +327,10 @@ so there are no folders, just press SCAN. Mac keyboards may need **fn** for the 
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.5.0-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.5.0-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.0-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.0-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.5.2-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.2-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.2-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.2-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes

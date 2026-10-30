@@ -7,7 +7,7 @@
 ; ===========================================================================
 
 #define AppName      "Four Tracker"
-#define AppVersion   "0.5.0"
+#define AppVersion   "0.5.2"
 #define AppPublisher "Four Tracker"
 #define AppExe       "Four Tracker.exe"
 #define Root         AddBackslash(SourcePath) + "..\"
@@ -29,6 +29,7 @@
   #error "Four Tracker.exe was not found in dist (or dist-fx for the FX version). Run build-windows.bat or build-windows-fx.bat first."
 #endif
 
+#define HasApp32    FileExists(Dist32 + AppExe)
 #define HasVst3_64  DirExists(Dist64 + "Four Tracker.vst3")
 #define HasVst3_32  DirExists(Dist32 + "Four Tracker.vst3")
 ; SHARE = the version you give to others: never includes VST2 (Steinberg's
@@ -62,7 +63,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayIcon={uninstallexe}
 OutputDir={#Root}{#DistDir}
 OutputBaseFilename=FourTracker-Setup-{#AppVersion}{#Edition}
 SetupIconFile={#Root}Resources\FourTracker.ico
@@ -77,12 +78,18 @@ CloseApplications=yes
 UsedUserAreasWarning=no
 
 [Types]
-Name: "full";   Description: "Program, all plugins and the sample pack"
-Name: "app";    Description: "Program only"
+Name: "full";   Description: "Everything: 64-bit and 32-bit program, all plugins, the sample pack"
+Name: "app";    Description: "64-bit program only (and the sample pack)"
+#if HasApp32
+Name: "app32";  Description: "32-bit program only (for 32-bit VST effects)"
+#endif
 Name: "custom"; Description: "Choose what to install"; Flags: iscustom
 
 [Components]
-Name: "app";     Description: "Four Tracker (standalone program)"; Types: full app custom; Flags: fixed
+Name: "app";     Description: "Four Tracker, 64-bit program (loads 64-bit VST3 effects)"; Types: full app custom
+#if HasApp32
+Name: "app32";   Description: "Four Tracker, 32-bit program (loads 32-bit VST3 effects; own effect list)"; Types: full app32
+#endif
 #if HasVst3_64
 Name: "vst3";    Description: "VST3 plugin, 64-bit"; Types: full
 #endif
@@ -97,7 +104,7 @@ Name: "vst2_32"; Description: "VST2 plugin, 32-bit (for 32-bit hosts such as old
 #endif
 
 #if HasSamples
-Name: "samples"; Description: "Four Tracker Sample Pack (88 drum, bass and synth sounds, CC0) in Documents\Four Tracker\Samples"; Types: full app
+Name: "samples"; Description: "Four Tracker Sample Pack (88 drum, bass and synth sounds, CC0) in Documents\Four Tracker\Samples"; Types: full app app32
 #endif
 
 [Tasks]
@@ -105,8 +112,11 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{#Dist64}{#AppExe}"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+#if HasApp32
+Source: "{#Dist32}{#AppExe}"; DestDir: "{app}\32-bit"; Components: app32; Flags: ignoreversion
+#endif
 #if HasManual
-Source: "Four Tracker User Manual.pdf"; DestDir: "{app}"; Components: app; Flags: ignoreversion
+Source: "Four Tracker User Manual.pdf"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 #if HasVst3_64
 Source: "{#Dist64}Four Tracker.vst3\*"; DestDir: "{commoncf64}\VST3\Four Tracker.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -126,7 +136,10 @@ Source: "Sample Pack\*"; DestDir: "{userdocs}\Four Tracker\Samples\Four Tracker 
 #endif
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; Components: app
+#if HasApp32
+Name: "{group}\{#AppName} (32-bit)"; Filename: "{app}\32-bit\{#AppExe}"; Components: app32
+#endif
 #if HasManual
 Name: "{group}\{#AppName} User Manual"; Filename: "{app}\Four Tracker User Manual.pdf"
 #endif
@@ -134,10 +147,16 @@ Name: "{group}\{#AppName} User Manual"; Filename: "{app}\Four Tracker User Manua
 Name: "{group}\{#AppName} Sample Pack"; Filename: "{userdocs}\Four Tracker\Samples\Four Tracker Sample Pack"; Components: samples
 #endif
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; Components: app
+#if HasApp32
+Name: "{autodesktop}\{#AppName} (32-bit)"; Filename: "{app}\32-bit\{#AppExe}"; Tasks: desktopicon; Components: app32
+#endif
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent; Components: app
+#if HasApp32
+Filename: "{app}\32-bit\{#AppExe}"; Description: "Start {#AppName} (32-bit) now"; Flags: nowait postinstall skipifsilent unchecked; Components: app32 and not app
+#endif
 
 [Code]
 var
@@ -167,6 +186,23 @@ begin
   Vst2Page.Add('32-bit VST2 folder:');
   Vst2Page.Values[0] := GetPreviousData('Vst2Dir64', ExpandConstant('{commonpf64}\Steinberg\VstPlugins'));
   Vst2Page.Values[1] := GetPreviousData('Vst2Dir32', ExpandConstant('{commonpf32}\Steinberg\VstPlugins'));
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = wpSelectComponents then
+  begin
+#if HasApp32
+    if not (WizardIsComponentSelected('app') or WizardIsComponentSelected('app32')) then
+#else
+    if not WizardIsComponentSelected('app') then
+#endif
+    begin
+      MsgBox('Choose the 64-bit or the 32-bit program (or both).', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

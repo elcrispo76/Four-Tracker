@@ -3,7 +3,7 @@
 
 #pragma once
 
-// VST effect hosting: 2 effect slots per channel. Only compiled in the
+// VST effect hosting: 3 effect slots per channel, and 3 on the master (the whole mix). Only compiled in the
 // personal "FX" build (cmake -DFOURTRACKER_FX_HOST=ON, build-windows-fx.bat)
 // and only active in the standalone app.
 
@@ -15,14 +15,19 @@
 class FxHost : private juce::Timer
 {
 public:
-    static constexpr int kSlotsPerChannel = 2;
+    static constexpr int kSlotsPerChannel = 3;
+    /** The master's effects (on the whole mix) use this as their channel number. */
+    static constexpr int kMaster = ft::kNumChannels;
+    static constexpr int kNumFxChannels = ft::kNumChannels + 1;
+    /** "CH1" .. "CH16", or "MASTER". */
+    static juce::String channelName (int channel) { return channel == kMaster ? juce::String ("MASTER") : "CH" + juce::String (channel + 1); }
 
     FxHost();
     ~FxHost() override;
 
     // ---- audio ------------------------------------------------------------------
     void prepare (double sampleRate, int blockSize);
-    /** Audio thread: runs the channel's effects over its stereo buffer. */
+    /** Audio thread: runs the channel's effects (or the master's, channel kMaster) over its stereo buffer. */
     void process (int channel, float* left, float* right, int numSamples) noexcept;
 
     /** Audio thread, once per block before process(): the song position the effects see
@@ -61,7 +66,7 @@ public:
     /** The loaded plugin (message thread; for tests and the editor). */
     juce::AudioPluginInstance* getInstance (int channel, int slot) const
     {
-        return juce::isPositiveAndBelow (channel, ft::kNumChannels) && juce::isPositiveAndBelow (slot, kSlotsPerChannel)
+        return juce::isPositiveAndBelow (channel, kNumFxChannels) && juce::isPositiveAndBelow (slot, kSlotsPerChannel)
                  ? slots[(size_t) channel][(size_t) slot].plugin.get() : nullptr;
     }
 
@@ -114,7 +119,7 @@ private:
     juce::KnownPluginList known;
     juce::FileSearchPath searchPath;
 
-    std::array<std::array<Slot, kSlotsPerChannel>, ft::kNumChannels> slots;
+    std::array<std::array<Slot, kSlotsPerChannel>, kNumFxChannels> slots;
     std::array<std::atomic<int>, ft::kNumChannels> route;
     juce::CriticalSection audioLock;          // the audio thread only tries it
     juce::MidiBuffer emptyMidi;
@@ -137,7 +142,7 @@ private:
     juce::uint32 restoreDoneAt = 0;
 
     struct EditorWindow;
-    std::array<std::array<std::unique_ptr<juce::DocumentWindow>, kSlotsPerChannel>, ft::kNumChannels> windows;
+    std::array<std::array<std::unique_ptr<juce::DocumentWindow>, kSlotsPerChannel>, kNumFxChannels> windows;
 };
 
 #endif

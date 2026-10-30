@@ -58,11 +58,16 @@ void TitleBar::paint (Graphics& g)
     r.removeFromRight (rightReserve);
     auto statusArea = r.reduced (24.0f, 0.0f);
     const int n = st.numChannels(), first = st.firstVisibleChannel();
-    const String what = n <= kVisibleChannels ? String (n) + " TRACK SAMPLE TRACKER"
-                      : "TRACKS " + String (first + 1) + "-" + String (jmin (n, first + kVisibleChannels)) + " OF " + String (n);
+    String what = n <= kVisibleChannels ? String (n) + " TRACK SAMPLE TRACKER"
+                : "TRACKS " + String (first + 1) + "-" + String (jmin (n, first + kVisibleChannels)) + " OF " + String (n);
+    if (PixelFont::getWidth (what, 15.0f) > statusArea.getWidth())          // short form when the title bar is full
+        what = n <= kVisibleChannels ? String (n) + " TRACKS"
+                                     : String (first + 1) + "-" + String (jmin (n, first + kVisibleChannels)) + " OF " + String (n);
     Theme::text (g, what, statusArea, 15.0f, Theme::screenText, Justification::centredLeft);
-    g.reduceClipRegion (statusArea.withTrimmedLeft (PixelFont::getWidth (what, 15.0f) + 16.0f).toNearestInt());
-    Theme::text (g, lastStatus, statusArea.withTrimmedRight (6.0f), 15.0f, Theme::screenDim.brighter (0.4f), Justification::centredRight);
+    // the status text (cursor, step ...) only when it fits whole next to it
+    const float room = statusArea.getWidth() - PixelFont::getWidth (what, 15.0f) - 22.0f;
+    if (PixelFont::getWidth (lastStatus, 15.0f) <= room)
+        Theme::text (g, lastStatus, statusArea.withTrimmedRight (6.0f), 15.0f, Theme::screenDim.brighter (0.4f), Justification::centredRight);
 }
 
 void TitleBar::mouseDown (const MouseEvent& e)

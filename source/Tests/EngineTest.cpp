@@ -1256,6 +1256,21 @@ int main (int argc, char** argv)
                     }
                 }
 
+                // MASTER effects: on the whole mix (the instrument plugin there silences everything)
+                {
+                    host->setBypass (0, 0, true);
+                    const auto merr = host->loadSlot (FxHost::kMaster, 0, *found[0]);
+                    CHECK (merr.isEmpty() && host->hasPlugin (FxHost::kMaster, 0) && host->getInstance (FxHost::kMaster, 0) != nullptr,
+                           "FX build: a plugin loads into MASTER FX1 " + merr);
+                    const float mwet = peakCh (120);
+                    CHECK (mwet < 0.001f, "FX build: the whole mix goes through the MASTER effect (" + String (mwet, 4) + ")");
+                    host->setBypass (FxHost::kMaster, 0, true);
+                    const float mbyp = peakCh (120);
+                    CHECK (mbyp > 0.05f, "FX build: MASTER BYPASS gives the mix back (" + String (mbyp, 3) + ")");
+                    CHECK (FxHost::channelName (FxHost::kMaster) == "MASTER" && FxHost::channelName (0) == "CH1", "FX build: the master slots are called MASTER");
+                    host->setBypass (0, 0, false);
+                }
+
                 // settings file: a new FX host restores the slot after prepare
                 host->saveSettings();
                 ef.requestStop();
@@ -1266,6 +1281,8 @@ int main (int argc, char** argv)
                 AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
                 pf2->prepareToPlay (44100.0, 256);
                 for (int i = 0; i < 20 && ! pf2->getFxHost()->hasPlugin (0, 0); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50);
+                CHECK (pf2->getFxHost()->hasPlugin (FxHost::kMaster, 0) && pf2->getFxHost()->isBypassed (FxHost::kMaster, 0),
+                       "FX build: the MASTER effect (bypassed) is remembered after a restart");
                 CHECK (pf2->getFxHost()->hasPlugin (0, 0) && pf2->getFxHost()->getSlotName (0, 0) == found[0]->name,
                        "FX build: CH1 FX1 is restored after a restart");
 
@@ -1356,7 +1373,7 @@ int main (int argc, char** argv)
                     CHECK (h->getRoute (5) == -1 && h->getRoute (3) == -1, "FX chaining: removing tracks removes their chaining");
                 }
                 pf2->clearAllEffects();
-                CHECK (! pf2->getFxHost()->hasPlugin (0, 0), "FX build: NEW MODULE / Empty removes the effects");
+                CHECK (! pf2->getFxHost()->hasPlugin (0, 0) && ! pf2->getFxHost()->hasPlugin (FxHost::kMaster, 0), "FX build: NEW MODULE / Empty removes the effects (master too)");
                 CHECK (pf2->getFxHost()->getRoute (1) == -1 && pf2->getFxHost()->getRoute (2) == -1, "FX build: NEW MODULE / Empty removes the chaining too");
                 pf2.reset();
             }
@@ -2238,6 +2255,147 @@ int main (int argc, char** argv)
         play (outLoop);
         CHECK (outLoop > 0.0, "a chaining loop is ignored (the sound still comes out)");
         er.channelInsert = nullptr; er.channelRoute = nullptr;
+
+        // the master insert gets the whole mix, after the channels, before MASTER volume
+        double seen = 0.0;
+        float masterGain = 1.0f;
+        er.masterInsert = [&] (float* l, float* rr, int n)
+        {
+            for (int i = 0; i < n; ++i) { seen += (double) l[i] * l[i] + (double) rr[i] * rr[i]; l[i] *= masterGain; rr[i] *= masterGain; }
+        };
+        double outMaster = 0;
+        play (outMaster);
+        CHECK (seen > 0.0 && outMaster > 0.0, "master insert: it gets the mix");
+        masterGain = 0.0f; seen = 0.0;
+        double outMasterSilent = 0;
+        play (outMasterSilent);
+        CHECK (seen > 0.0 && outMasterSilent < 1e-9, "master insert: what it does is what comes out (silenced: " + String (outMasterSilent) + ")");
+        er.masterInsert = nullptr;
+    }
+
+    // a sample slot turned into SYNTH 1 / SYNTH 2 / MIDI keeps its sample: SAMPLE brings it back
+    {
+        auto pk = std::make_unique<FourTrackerProcessor>();
+        auto& in = pk->getInstrument (1);
+        const String name = in.name;
+        const int len = in.isEmpty() ? 0 : in.data->getLength();
+        CHECK (! in.isEmpty() && ! in.isSynth(), "slot 01 holds a sample (" + name + ")");
+        in.makeSynth (0);
+        CHECK (in.isSynth() && in.hasKeptSample(), "SYNTH 1: the sample is kept");
+        in.makeSynth2();
+        in.makeMidi();
+        CHECK (in.isMidi() && in.hasKeptSample(), "then SYNTH 2, then MIDI: still kept");
+        CHECK (in.restoreSample() && in.name == name && in.data->getLength() == len && ! in.isSynth() && ! in.isMidi() && ! in.hasKeptSample(),
+               "SAMPLE: the original sample is back (" + in.name + ")");
+        in.makeSynth (1);
+        in.keepSample();                 // already a synth: nothing new to keep
+        CHECK (in.restoreSample() && in.name == name, "keeping again while a synth doesn't lose the sample");
+    }
+
+    // the instrument under the cursor becomes the selected one (auto-select instrument)
+    {
+        auto pa = std::make_unique<FourTrackerProcessor>();
+        pa->prepareToPlay (44100.0, Runner::block);
+        auto& pat = pa->getEngine().getPattern (0);
+        pat.at (5, 0).note = 49; pat.at (5, 0).inst = 3;
+        pa->selectedInstrument = 1;
+        std::unique_ptr<AudioProcessorEditor> eda (pa->createEditor());
+        eda->setSize (1536, 1024);
+        auto* ft = dynamic_cast<FourTrackerEditor*> (eda.get());
+        CHECK (ft != nullptr, "editor");
+        if (ft != nullptr)
+        {
+            for (int i = 0; i < 5; ++i) ft->keyPressed (KeyPress (KeyPress::downKey));
+            CHECK (pa->selectedInstrument == 3, "cursor on a cell with instrument 03: instrument 03 is selected (" + String (pa->selectedInstrument) + ")");
+            ft->keyPressed (KeyPress (KeyPress::downKey));
+            CHECK (pa->selectedInstrument == 3, "an empty cell keeps the instrument");
+        }
+        eda.reset();
+    }
+
+    // FADE key (C-6 = MIDI 84): all tracks fade out over FADE bars and stay silent (still playing);
+    // the same key fades them back in. STOP / START bring the full volume back.
+    {
+        auto pf = std::make_unique<FourTrackerProcessor>();
+        pf->prepareToPlay (44100.0, Runner::block);
+        auto& ef = pf->getEngine();
+        ef.bpm = 125; ef.speed = 6; ef.fadeBars = 1;           // 1 bar at 125 BPM = 1.92 s
+        ef.requestPattern (0);
+        ef.loopPattern = true;
+        Runner rf { *pf };
+        auto key = [&] (int note) { rf.run (1, [note] (int, MidiBuffer& m) { m.addEvent (MidiMessage::noteOn (1, note, (uint8) 100), 0); }); };
+        auto level = [&] (double secs)
+        {
+            const int start = rf.written;
+            rf.run ((int) (secs * 44100 / Runner::block));
+            float pk = 0;
+            for (int i = start; i < rf.written; ++i) pk = jmax (pk, std::abs (rf.all.getSample (0, i)));
+            return pk;
+        };
+        key (36);                                              // start
+        rf.run ((int) (1.0 * 44100 / Runner::block));
+        const float before = level (1.0);
+        const int patBefore = ef.selectedPattern.load();
+        key (84);                                              // FADE
+        CHECK (ef.getFadeState() == ft::TrackerEngine::fadeOutRunning && ef.selectedPattern.load() == patBefore,
+               "C-6 starts the fade out (and does not switch pattern)");
+        const float halfway = level (1.0);
+        CHECK (halfway < before * 0.95f, "fading out: quieter (" + String (halfway, 3) + " from " + String (before, 3) + ")");
+        level (1.2);
+        const float silent = level (1.0);
+        CHECK (ef.playing.load() && ef.getFadeState() == ft::TrackerEngine::fadeSilent && silent < 1.0e-6f,
+               "faded out: silent, but it keeps playing");
+        key (84);                                              // the same key: back in
+        CHECK (ef.getFadeState() == ft::TrackerEngine::fadeInRunning, "C-6 again: fades back in");
+        level (2.2);
+        const float back = level (1.0);
+        CHECK (ef.getFadeState() == ft::TrackerEngine::fadeNone && back > before * 0.8f, "faded back in to full (" + String (back, 3) + ")");
+        // turning round half way
+        key (84); level (0.8); key (84);
+        CHECK (ef.getFadeState() == ft::TrackerEngine::fadeInRunning, "pressed while fading out: turns round and fades in");
+        level (1.5);
+        CHECK (ef.getFadeState() == ft::TrackerEngine::fadeNone && ef.fadeLevel.load() > 0.99f, "...back to full");
+        // faded out, then STOP and START: full volume again
+        key (84); level (2.2);
+        key (36); level (0.3);
+        key (36); rf.run ((int) (0.5 * 44100 / Runner::block));
+        const float again = level (1.0);
+        CHECK (! ef.isFading() && again > before * 0.8f, "STOP + START after a fade: full volume again (" + String (again, 3) + ")");
+        // LEARN
+        ef.fadeLearn = true;
+        key (96);
+        CHECK (ef.midiFadeNote.load() == 96 && ! ef.isFading(), "FADE OUT LEARN: the next key (C-7) becomes the fade key");
+        ef.requestStop(); rf.run (2);
+    }
+
+    // MASTER in the title bar: the volume of all tracks, the same value as on the MIDI / AUDIO page
+    {
+        auto pm = std::make_unique<FourTrackerProcessor>();
+        pm->prepareToPlay (44100.0, Runner::block);
+        std::unique_ptr<AudioProcessorEditor> edm (pm->createEditor());
+        edm->setSize (1536, 1024);
+        std::function<MasterVolume* (Component&)> findMaster = [&] (Component& c) -> MasterVolume*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* m = dynamic_cast<MasterVolume*> (ch)) return m;
+                if (auto* m = findMaster (*ch)) return m;
+            }
+            return nullptr;
+        };
+        auto* mv = findMaster (*edm);
+        CHECK (mv != nullptr && mv->isVisible() && mv->getShownValue() == pm->getEngine().masterVolume.load(), "MASTER volume is in the title bar");
+        if (mv != nullptr)
+        {
+            mv->set (50);
+            CHECK (pm->getEngine().masterVolume.load() == 50, "MASTER - / + / drag sets the master volume of all tracks");
+            pm->getEngine().masterVolume = 30;
+            MessageManager::getInstance()->runDispatchLoopUntil (250);
+            CHECK (mv->getShownValue() == 30, "MASTER follows a change on the MIDI / AUDIO page");
+            mv->set (200);
+            CHECK (pm->getEngine().masterVolume.load() == 100, "MASTER stops at 100");
+        }
+        edm.reset();
     }
 
     // the song position the channel effects see (tempo-synced effects like the Breakbeat Processor)

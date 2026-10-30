@@ -99,6 +99,10 @@ struct InstrumentSnapshot : public juce::ReferenceCountedObject
 /** Message-thread side instrument (owned by the processor). */
 struct Instrument
 {
+    /** The sample this slot had before it became SYNTH 1, SYNTH 2 or MIDI: the SAMPLE button
+        brings it back (until another sample is loaded). Not saved in modules. */
+    std::shared_ptr<const Instrument> keptSample;
+
     juce::String name;          // shown in the UI, e.g. "KICK.WAV"
     juce::String sourcePath;    // file it was loaded from (informational)
     SampleData::Ptr data;
@@ -141,6 +145,12 @@ struct Instrument
 
     /** Turns this slot into a MIDI instrument: its notes go to MIDI out (a device, or the DAW). */
     void makeMidi();
+
+    /** Keeps the sample (if this slot holds one) before it turns into a synth or MIDI. */
+    void keepSample();
+    /** Brings the kept sample back. False if there is none. */
+    bool restoreSample();
+    bool hasKeptSample() const noexcept { return keptSample != nullptr; }
     bool isMidi() const noexcept { return ! isEmpty() && params.midi; }
 };
 

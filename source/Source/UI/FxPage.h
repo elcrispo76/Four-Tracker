@@ -11,7 +11,7 @@
 #include "../FxHost.h"
 
 /** VST EFFECTS page (FX build, standalone): the plugin folders and the scan,
-    and two effect slots per channel picked from drop-down lists. */
+    and three effect slots per channel and on the master, picked from drop-down lists. */
 namespace fxui
 {
     /** Fills an effect drop-down: "--- EMPTY ---" and every scanned effect, with the slot's effect selected. */
@@ -58,7 +58,7 @@ private:
     FxHost& fx;
     FxLookAndFeel lnf;
     juce::Array<juce::PluginDescription> effects;
-    std::array<std::array<std::unique_ptr<SlotUI>, FxHost::kSlotsPerChannel>, ft::kNumChannels> ui;
+    std::array<std::array<std::unique_ptr<SlotUI>, FxHost::kSlotsPerChannel>, FxHost::kNumFxChannels> ui;
 
     PixelButton addFolder { "ADD FOLDER", PixelButton::Style::Raised, 18.0f },
                 removeFolder { "REMOVE LAST", PixelButton::Style::Raised, 18.0f },

@@ -73,6 +73,9 @@ File FxHost::settingsFolder()
 {
    #if JUCE_MAC
     return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Application Support/Four Tracker");
+   #elif JUCE_WINDOWS && ! JUCE_64BIT
+    // the 32-bit program keeps its own plugin list and effects (it loads 32-bit plugins only)
+    return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Four Tracker 32-bit");
    #else
     return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Four Tracker");
    #endif
@@ -153,7 +156,7 @@ void FxHost::process (int channel, float* left, float* right, int n) noexcept
 
 String FxHost::loadSlot (int channel, int index, const PluginDescription& desc)
 {
-    if (! isPositiveAndBelow (channel, ft::kNumChannels) || ! isPositiveAndBelow (index, kSlotsPerChannel))
+    if (! isPositiveAndBelow (channel, kNumFxChannels) || ! isPositiveAndBelow (index, kSlotsPerChannel))
         return "No such slot";
 
     const double sr = sampleRate > 0 ? sampleRate : 44100.0;
@@ -219,7 +222,7 @@ void FxHost::clearRoutes()
 void FxHost::clearAll()
 {
     clearRoutes();
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    for (int c = 0; c < kNumFxChannels; ++c)
         for (int i = 0; i < kSlotsPerChannel; ++i)
             if (hasPlugin (c, i)) clearSlot (c, i);
     pendingSlots.reset();
@@ -266,7 +269,7 @@ void FxHost::showEditor (int channel, int index)
     AudioProcessorEditor* ed = s.plugin->hasEditor() ? s.plugin->createEditorIfNeeded() : nullptr;
     if (ed == nullptr) ed = new GenericAudioProcessorEditor (*s.plugin);
 
-    const String title = "CH" + String (channel + 1) + " FX" + String (index + 1) + " - " + s.desc.name;
+    const String title = channelName (channel) + " FX" + String (index + 1) + " - " + s.desc.name;
     w = std::make_unique<EditorWindow> (title, ed, [this, channel, index] { windows[(size_t) channel][(size_t) index].reset(); });
 }
 
@@ -425,7 +428,7 @@ void FxHost::saveSettings()
     if (auto k = known.createXml())
         root.createNewChildElement ("KNOWN")->addChildElement (k.release());
 
-    for (int c = 0; c < ft::kNumChannels; ++c)
+    for (int c = 0; c < kNumFxChannels; ++c)
         for (int i = 0; i < kSlotsPerChannel; ++i)
         {
             auto& s = slots[(size_t) c][(size_t) i];
@@ -523,7 +526,7 @@ void FxHost::restorePendingSlots()
     for (auto* e : pending->getChildWithTagNameIterator ("SLOT"))
     {
         const int c = e->getIntAttribute ("channel", -1), i = e->getIntAttribute ("slot", -1);
-        if (! isPositiveAndBelow (c, ft::kNumChannels) || ! isPositiveAndBelow (i, kSlotsPerChannel)) continue;
+        if (! isPositiveAndBelow (c, kNumFxChannels) || ! isPositiveAndBelow (i, kSlotsPerChannel)) continue;
 
         PluginDescription desc;
         bool ok = false;

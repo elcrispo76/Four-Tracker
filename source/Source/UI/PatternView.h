@@ -56,6 +56,8 @@ private:
     void moveCursor (int dRow, int dCol, bool extendSelection);
     void setCursorRow (int r, bool extendSelection);
     void updateSelectionFromAnchor();
+    /** The cursor moved onto a cell with an instrument number: that instrument is selected. */
+    void followInstrument();
     void enterNote (int note);
     void enterHexDigit (int digit);
     void clearField();
