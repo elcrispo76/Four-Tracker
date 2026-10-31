@@ -1,0 +1,560 @@
+<title>Four Tracker – free sample tracker for Windows (ProTracker / FastTracker style, VST3)</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Four Tracker is a free sample tracker for Windows in the style of ProTracker, FastTracker 2 and OctaMED: 1 to 16 tracks, WAV / AIFF / Amiga 8SVX samples, a built-in synth, VST3 effects and live pattern switching from a MIDI keyboard. Standalone app and VST3 plugin.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a tracker "chassis" page – grey panels like the app, black screens for the
+   tracker-ish parts (status LCD, keyboard map), one red accent = the EDIT/play colour. */
+:root {
+  --chassis: #b9bdc6;        /* page ground, the app's body grey */
+  --panel: #d3d6dd;          /* raised panels */
+  --panel-hi: #eceef2;       /* bevel highlight */
+  --panel-lo: #868a93;       /* bevel shadow */
+  --ink: #0d0e11;            /* text on panels */
+  --ink-soft: #3b3e45;
+  --screen: #060709;         /* black tracker screens */
+  --screen-text: #eceef2;
+  --screen-dim: #7d828c;
+  --red: #d8322a;            /* EDIT button / play line */
+  --red-ink: #ffffff;
+  --link: #a3221c;
+
+  --f-display: "Silkscreen", "Courier New", monospace;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", "Consolas", ui-monospace, monospace;
+
+  --step--1: 0.875rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: clamp(2rem, 1.2rem + 3.2vw, 3.4rem);
+  --gutter: 16px;
+  --maxw: 1120px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chassis: #16171b; --panel: #23252a; --panel-hi: #34373e; --panel-lo: #08090b;
+    --ink: #e6e8ec; --ink-soft: #a7abb4; --screen: #030304; --screen-text: #eceef2;
+    --screen-dim: #6d727c; --red: #e0453c; --red-ink: #ffffff; --link: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --chassis: #16171b; --panel: #23252a; --panel-hi: #34373e; --panel-lo: #08090b;
+  --ink: #e6e8ec; --ink-soft: #a7abb4; --screen: #030304; --screen-text: #eceef2;
+  --screen-dim: #6d727c; --red: #e0453c; --red-ink: #ffffff; --link: #ff8a80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--chassis);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+
+.wrap {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+}
+
+/* raised panel, like the app's controls */
+.panel {
+  background: var(--panel);
+  border-top: 2px solid var(--panel-hi);
+  border-left: 2px solid var(--panel-hi);
+  border-right: 2px solid var(--panel-lo);
+  border-bottom: 2px solid var(--panel-lo);
+}
+.screen {
+  background: var(--screen);
+  color: var(--screen-text);
+  border: 3px solid #44474e;
+  border-radius: 6px;
+}
+.label {
+  font-family: var(--f-display);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------- top bar ---------- */
+.topbar { padding-block: 14px; }
+.topbar .wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ink); }
+.brand img { width: 40px; height: 40px; }
+.brand span { font-family: var(--f-display); font-weight: 700; font-size: 1.25rem; letter-spacing: 0.04em; }
+.nav { display: flex; gap: 6px 18px; flex-wrap: wrap; margin-left: auto; }
+.nav a { color: var(--ink); text-decoration: none; font-family: var(--f-display); font-size: 0.8rem; letter-spacing: 0.05em; }
+.nav a:hover { color: var(--red); }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 14px 22px;
+  font-family: var(--f-display); font-size: 0.95rem; letter-spacing: 0.05em;
+  text-decoration: none; cursor: pointer;
+  border: 2px solid #2a2c30; border-radius: 4px;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.35), 0 2px 0 rgba(0,0,0,0.25);
+  transition: transform 80ms ease;
+}
+.btn:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2); }
+.btn-red { background: var(--red); color: var(--red-ink); }
+.btn-light { background: var(--panel-hi); color: var(--ink); }
+.btn small { display: block; font-family: var(--f-body); font-size: 0.75rem; letter-spacing: 0; opacity: 0.85; }
+.btn .btn-text { display: flex; flex-direction: column; line-height: 1.25; }
+
+/* ---------- hero ---------- */
+.hero { padding-block: 28px 40px; }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 36px; align-items: center; }
+.hero h1 {
+  font-family: var(--f-display); font-weight: 700;
+  font-size: var(--step-3); line-height: 1.02; letter-spacing: 0.02em;
+}
+.hero .lede { font-size: var(--step-1); margin-top: 18px; max-width: 30ch; color: var(--ink); }
+.hero .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; }
+.hero .meta { margin-top: 14px; font-size: var(--step--1); color: var(--ink-soft); }
+.bezel {
+  padding: 14px; border-radius: 14px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  border: 2px solid var(--panel-lo);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.25);
+}
+.bezel img { display: block; width: 100%; height: auto; border-radius: 6px; border: 2px solid #2a2c30; }
+
+/* ---------- status LCD ---------- */
+.lcd {
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px;
+  font-family: var(--f-mono); font-weight: 500; font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+.lcd .dim { color: var(--screen-dim); }
+.lcd .play { color: var(--red); }
+
+/* ---------- sections ---------- */
+section { padding-block: 44px; }
+.section-head { display: grid; gap: 10px; margin-bottom: 26px; max-width: 62ch; }
+.section-head h2 { font-family: var(--f-display); font-weight: 700; font-size: var(--step-2); letter-spacing: 0.03em; }
+.section-head p { color: var(--ink-soft); }
+
+/* ---------- live keyboard ---------- */
+.live { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 28px; align-items: start; }
+.keyboard-box { padding: 16px; display: grid; gap: 14px; }
+.keys { position: relative; height: 170px; user-select: none; }
+.white-keys { display: flex; height: 100%; gap: 3px; }
+.wkey {
+  flex: 1 1 0; min-width: 0; position: relative;
+  background: #f4f5f7; border: 1px solid #2a2c30; border-radius: 0 0 5px 5px;
+  cursor: pointer; padding: 0; font: inherit;
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  padding-bottom: 8px; gap: 2px;
+}
+.bkey {
+  position: absolute; top: 0; width: calc(100% / 14 * 0.62); height: 60%;
+  background: #15161a; border: 1px solid #000; border-radius: 0 0 4px 4px;
+  cursor: pointer; padding: 0; font: inherit; color: #eceef2;
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 6px;
+  z-index: 2;
+}
+.wkey .n, .bkey .n { font-family: var(--f-mono); font-size: 0.62rem; color: #6d717a; }
+.bkey .n { color: #8a8f99; }
+.wkey .p, .bkey .p { font-family: var(--f-display); font-size: 0.7rem; color: #0d0e11; }
+.bkey .p { color: #eceef2; }
+.wkey.start { background: var(--red); }
+.wkey.start .p, .wkey.start .n { color: #fff; }
+.wkey.is-playing, .bkey.is-playing { box-shadow: inset 0 -6px 0 var(--red); }
+.wkey.is-queued, .bkey.is-queued { box-shadow: inset 0 -6px 0 #f0b400; }
+.wkey:hover { background: #ffffff; }
+.wkey.start:hover { background: var(--red); filter: brightness(1.08); }
+.bkey:hover { background: #2a2c31; }
+.keys-legend { display: flex; gap: 8px 18px; flex-wrap: wrap; font-size: var(--step--1); color: var(--ink-soft); }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; border: 1px solid #2a2c30; }
+.modes { display: grid; gap: 10px; }
+.mode { padding: 12px 14px; display: grid; gap: 4px; }
+.mode b { font-family: var(--f-display); font-weight: 400; font-size: 0.82rem; letter-spacing: 0.04em; }
+.mode p { font-size: var(--step--1); color: var(--ink-soft); }
+.mode.default { outline: 2px solid var(--red); outline-offset: -2px; }
+
+/* ---------- features ---------- */
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.feature { padding: 18px; display: grid; gap: 8px; align-content: start; }
+.feature h3 { font-family: var(--f-display); font-weight: 700; font-size: 0.95rem; letter-spacing: 0.03em; }
+.feature p { font-size: 0.95rem; color: var(--ink-soft); }
+.cell {
+  font-family: var(--f-mono); font-size: 0.85rem; font-variant-numeric: tabular-nums;
+  background: var(--screen); color: var(--screen-text); padding: 2px 8px; border-radius: 3px;
+  justify-self: start; white-space: nowrap;
+}
+
+/* ---------- screens ---------- */
+.shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.shot { display: grid; gap: 8px; margin: 0; }
+.shot img { width: 100%; height: auto; display: block; border-radius: 6px; border: 2px solid #2a2c30; background: var(--screen); }
+.shot figcaption { font-size: var(--step--1); color: var(--ink-soft); }
+.shot figcaption b { font-family: var(--f-display); font-weight: 400; font-size: 0.78rem; letter-spacing: 0.05em; color: var(--ink); margin-right: 6px; }
+
+/* ---------- download ---------- */
+.download-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.dl-card { padding: 22px; display: grid; gap: 14px; align-content: start; }
+.dl-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.03em; }
+.spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 0.95rem; margin: 0; }
+.spec dt { color: var(--ink-soft); }
+.spec dd { margin: 0; }
+.note { font-size: var(--step--1); color: var(--ink-soft); }
+
+/* ---------- donate ---------- */
+.donate { padding: 26px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; }
+.donate h2 { font-family: var(--f-display); font-weight: 700; font-size: var(--step-2); letter-spacing: 0.03em; }
+.donate p { margin-top: 8px; color: var(--ink-soft); max-width: 58ch; }
+
+/* ---------- status ---------- */
+.status-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.status-card { padding: 22px; display: grid; gap: 12px; align-content: start; }
+.status-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 0.95rem; letter-spacing: 0.03em; }
+.status-card p { color: var(--ink-soft); }
+.stages { list-style: none; margin: 0; padding: 10px; display: grid; gap: 6px; background: var(--screen); border-radius: 4px; }
+.stages li { display: grid; grid-template-columns: 12ch 1fr; gap: 12px; align-items: baseline; padding: 8px 10px;
+             color: var(--screen-dim); font-size: var(--step--1); }
+.stages li b { font-family: var(--f-display); font-weight: 400; font-size: 0.78rem; letter-spacing: 0.05em; }
+.stages li.now { background: var(--red); color: var(--red-ink); }
+.stages li.done { color: var(--screen-text); }
+.badge { display: inline-block; font-family: var(--f-display); font-size: 0.72rem; letter-spacing: 0.06em;
+         padding: 2px 8px; background: var(--red); color: var(--red-ink); border-radius: 3px; vertical-align: middle; }
+@media (max-width: 480px) { .stages li { grid-template-columns: 1fr; gap: 2px; } }
+
+/* ---------- footer ---------- */
+footer { padding-block: 30px 40px; font-size: var(--step--1); color: var(--ink-soft); }
+footer .wrap { display: grid; gap: 8px; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  .hero-grid, .live, .download-grid { grid-template-columns: minmax(0, 1fr); }
+  .features, .shots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .features, .shots { grid-template-columns: minmax(0, 1fr); }
+  .donate { grid-template-columns: minmax(0, 1fr); }
+  .keys { height: 140px; }
+  .wkey .n, .bkey .n { display: none; }
+  .wkey .p, .bkey .p { font-size: 0.58rem; }
+  .nav { margin-left: 0; }
+}
+</style>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="images/icon-256.png" alt="" width="40" height="40"><span>FOUR TRACKER</span></a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#live">LIVE</a>
+      <a href="#features">FEATURES</a>
+      <a href="#screens">SCREENS</a>
+      <a href="#download">DOWNLOAD</a>
+      <a href="#donate">DONATE</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1>FOUR TRACKER</h1>
+        <p class="lede">A free sample tracker in the style of ProTracker and FastTracker 2, with 1 to 16 tracks, that you play live: every key on your MIDI keyboard is a pattern.</p>
+        <div class="actions">
+          <a class="btn btn-red js-download" href="#download">
+            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.5.0</span> beta</small></span>
+          </a>
+          <a class="btn btn-light js-donate" href="#donate">
+            <span class="btn-text">DONATE<small>Keep it going</small></span>
+          </a>
+        </div>
+        <p class="meta">Standalone app with ASIO and VST3 effects, and a VST3 plugin for your DAW. Windows 10/11, 64-bit and 32-bit.</p>
+      </div>
+      <div class="bezel">
+        <img src="images/tracks.jpg" alt="Four Tracker, a free music tracker for Windows: channel strips with VST effects above a pattern with notes, instruments and effects." width="1536" height="1024">
+      </div>
+    </div>
+  </section>
+
+  <section id="live">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>PLAY IT LIVE</h2>
+        <p>C-2 starts and stops. Every key from C#2 upwards picks a pattern, up to 64 of them. Change pattern while it plays and the music carries on in time, no restart. Try it on the keys below.</p>
+      </div>
+      <div class="live">
+        <div class="panel keyboard-box">
+          <div class="screen lcd" aria-live="polite">
+            <span id="lcd-left">STOPPED · PATTERN 00</span>
+            <span id="lcd-right" class="dim">SPEED 6 · BPM 125</span>
+          </div>
+          <div class="keys" id="keys" role="group" aria-label="MIDI keyboard map"></div>
+          <div class="keys-legend">
+            <span><span class="swatch" style="background: var(--red)"></span>Start / stop (C-2)</span>
+            <span><span class="swatch" style="background: var(--red); border-radius: 50%"></span>Playing</span>
+            <span><span class="swatch" style="background: #f0b400"></span>Queued, takes over on the next row</span>
+          </div>
+        </div>
+        <div class="modes">
+          <div class="panel mode default"><b>NEXT ROW (LEGATO)</b><p>Switches on the next row and keeps the position. Sounds that ring, keep ringing. The default.</p></div>
+          <div class="panel mode"><b>NEXT BEAT (LEGATO)</b><p>Waits for the next beat (every 4th row), so switches always land in time.</p></div>
+          <div class="panel mode"><b>END OF PATTERN</b><p>The current pattern plays to its end, then the new one starts from row 00.</p></div>
+          <div class="panel mode"><b>RESTART AT ROW 0</b><p>Cuts straight to the new pattern from the top. A hard cut as an effect.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>WHAT'S INSIDE</h2>
+        <p>Everything a ProTracker or FastTracker user expects, built for a MIDI keyboard and a DAW.</p>
+      </div>
+      <div class="features">
+        <article class="panel feature">
+          <span class="cell">C-4 01 0C40</span>
+          <h3>Classic tracker patterns</h3>
+          <p>1 to 16 tracks (add them one at a time with + / −), 64 patterns of up to 256 rows, note · instrument · effect in every cell, hex or decimal.</p>
+        </article>
+        <article class="panel feature">
+          <span class="cell">00xy 03xx 0E9x 1Bxy</span>
+          <h3>FastTracker 2 effects</h3>
+          <p>Arpeggio, portamento, vibrato, retrigger, note delay, pattern loop and the rest, with the familiar numbers.</p>
+        </article>
+        <article class="panel feature">
+          <span class="cell">WAV AIFF FLAC 8SVX</span>
+          <h3>Your samples, old and new</h3>
+          <p>WAV, AIFF, FLAC, Ogg and MP3, plus Amiga IFF 8SVX and raw 8-bit samples straight off ProTracker and OctaMED disks. The built-in browser plays each sample as you arrow through the folder. Or make any slot a synth: SYNTH 1 (one waveform, ADSR, resonant filter, distortion, accent) or SYNTH 2 (two oscillators with PWM, a filter envelope, a tempo-synced LFO, chorus, delay and reverb, and 26 trance, italo disco and 80s patches). Every knob can be MIDI-learned.</p>
+        </article>
+        <article class="panel feature">
+          <span class="cell">S ▸ LOOP ◂ E</span>
+          <h3>Sample editor</h3>
+          <p>Start, end and loop points, ping-pong and reverse, cut, paste, fades, normalize and OctaMED-style MIX of two samples. Ctrl+A / C / X / V. 16 instrument slots.</p>
+        </article>
+        <article class="panel feature">
+          <span class="cell">CTRL+F3 F4 F5</span>
+          <h3>Fast editing</h3>
+          <p>Cut, copy and paste whole tracks or whole patterns, undo, SPACING 0-32 rows for the cursor, octaves C-0 to B-7.</p>
+        </article>
+        <article class="panel feature">
+          <span class="cell">VST3 FX · MIDI OUT</span>
+          <h3>Standalone or in your DAW</h3>
+          <p>Run it on its own with ASIO and two VST3 effects per track, and chain one track into another track's effects. Or load it as a VST3 instrument. MIDI instruments play your hardware or software synths from the pattern.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>SCREENS</h2>
+        <p>Six pages, one window. Everything sits on the same grey panel you see here.</p>
+      </div>
+      <div class="shots">
+        <figure class="shot"><img src="images/tracks.jpg" alt="Four Tracker main view with channel strips, VST effect lists and the pattern." loading="lazy" width="1536" height="1024"><figcaption><b>TRACKS</b>1 to 16 tracks with level, pan, pitch and VST effects.</figcaption></figure>
+        <figure class="shot"><img src="images/instruments.jpg" alt="Instruments page with the sample list and settings." loading="lazy" width="1536" height="1024"><figcaption><b>INSTRUMENTS</b>16 slots, volume, transpose, loop.</figcaption></figure>
+        <figure class="shot"><img src="images/sample-edit.jpg" alt="Sample editor with a waveform, markers and edit tools." loading="lazy" width="1536" height="1024"><figcaption><b>SAMPLE EDIT</b>Markers, loops, fades and zoom.</figcaption></figure>
+        <figure class="shot"><img src="images/song-pattern.jpg" alt="Song and pattern page with transport and module buttons." loading="lazy" width="1536" height="1024"><figcaption><b>SONG / PATTERN</b>Start, stop, new, load and save modules.</figcaption></figure>
+        <figure class="shot"><img src="images/block.jpg" alt="Block page with track and block operations." loading="lazy" width="1536" height="1024"><figcaption><b>BLOCK</b>Cut, copy, paste tracks and patterns.</figcaption></figure>
+        <figure class="shot"><img src="images/midi-audio.jpg" alt="MIDI and audio settings with the key map." loading="lazy" width="1536" height="1024"><figcaption><b>MIDI / AUDIO</b>Key map, switch mode, sound card.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>DOWNLOAD</h2>
+        <p>Free. One installer for the app, the VST3 plugin and the user manual.</p>
+      </div>
+      <div class="download-grid">
+        <div class="panel dl-card">
+          <h3>FOUR TRACKER <span class="js-version">v0.5.0</span> <span class="badge">BETA</span></h3>
+          <dl class="spec">
+            <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
+            <dt>Includes</dt><dd>Standalone app (ASIO, Windows Audio / WASAPI, DirectSound) with VST3 effects, VST3 plugin 64-bit and 32-bit, user manual (PDF)</dd>
+            <dt>Hosts</dt><dd>Any DAW that loads VST3 instruments</dd>
+            <dt>Price</dt><dd>Free</dd>
+          </dl>
+          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.5.0-share-fx.exe</small></span></a></div>
+          <p class="note">Windows may say "Windows protected your PC" because the installer isn't signed. Click <b>More info</b>, then <b>Run anyway</b>.</p>
+        </div>
+        <div class="panel dl-card">
+          <h3>USER MANUAL</h3>
+          <p>Getting started, the live keyboard, every page, the full effect list and keyboard shortcuts, in 12 pages.</p>
+          <div><a class="btn btn-light js-manual" href="Four-Tracker-User-Manual.pdf"><span class="btn-text">READ THE MANUAL<small>PDF · English</small></span></a></div>
+          <p class="note">First start: the app opens with a demo song and puts it in Documents\Four Tracker\Demo together with the demo samples.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="status">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>STATUS: BETA</h2>
+        <p>Four Tracker <span class="js-version">v0.5.0</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
+      </div>
+      <div class="status-grid">
+        <div class="panel status-card">
+          <h3>ROAD TO 1.0</h3>
+          <ol class="stages">
+            <li class="done"><b>ALPHA</b><span>Features still changing, things may break.</span></li>
+            <li class="now"><b>BETA ◂ NOW</b><span>Features in place, being tried by users. Bugs expected.</span></li>
+            <li><b>RELEASE CAND.</b><span>No new features, only bug fixes.</span></li>
+            <li><b>1.0 GOLD</b><span>Stable and reliable for everyday use and live sets.</span></li>
+          </ol>
+        </div>
+        <div class="panel status-card">
+          <h3>HOW IT WAS MADE</h3>
+          <p>Four Tracker is a one-person project, written with the help of an AI coding assistant (Claude). That is said openly here, because you should know what you are running.</p>
+          <p>Every version passes an automated test program before release. It plays patterns through MIDI, checks the live pattern switching, effects, the synth, sample formats, saving and loading, and the editor keys. Automated tests catch a lot, but they are not the same as many musicians using it for months. That is what the beta is for.</p>
+        </div>
+        <div class="panel status-card">
+          <h3>FOUND A BUG?</h3>
+          <p>Please report it, with the version number, what you did, and what happened. If you can, attach the module (.ftm).</p>
+          <div><a class="btn btn-light" href="https://github.com/elcrispo76/Four-Tracker/issues" target="_blank" rel="noopener"><span class="btn-text">REPORT A BUG<small>GitHub Issues</small></span></a></div>
+          <p class="note">Four Tracker is provided as is, without warranty of any kind. Don't rely on a beta for a gig without a backup.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="donate-section">
+    <div class="wrap">
+      <div class="panel donate" id="donate">
+        <div>
+          <h2>LIKE IT? BUY ME A COFFEE</h2>
+          <p>Four Tracker is free and made in spare time. A donation helps keep the updates coming.</p>
+        </div>
+        <a class="btn btn-red js-donate" href="#donate"><span class="btn-text">DONATE<small class="js-donate-label">Any amount</small></span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>© <span id="year">2026</span> Four Tracker. Made with JUCE.</p>
+    <p>VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a trademark and software of Steinberg Media Technologies GmbH.</p>
+  </div>
+</footer>
+
+<script>
+/* ===== Edit these links before you put the site online ===== */
+const SITE = {
+  version:  "0.5.0",
+  // Where the installer is hosted, e.g. a GitHub release:
+  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.5.0-share-fx.exe"
+  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.5.0/FourTracker-Setup-0.5.0-share-fx.exe",
+  // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
+  donate:   "https://ko-fi.com/fourtracker",
+  donateLabel: "Any amount",
+  manual:   "Four-Tracker-User-Manual.pdf"
+};
+/* ============================================================ */
+
+(function () {
+  const file = "FourTracker-Setup-" + SITE.version + "-share.exe";
+  document.querySelectorAll(".js-version").forEach(el => el.textContent = "v" + SITE.version);
+  document.querySelectorAll(".js-filename").forEach(el => el.textContent = file);
+  document.querySelectorAll(".js-donate-label").forEach(el => el.textContent = SITE.donateLabel);
+  const ext = (el, url) => { if (!url) return; el.href = url; el.target = "_blank"; el.rel = "noopener"; };
+  document.querySelectorAll(".js-download").forEach(el => SITE.download ? ext(el, SITE.download) : null);
+  document.querySelectorAll(".js-donate").forEach(el => SITE.donate ? ext(el, SITE.donate) : null);
+  document.querySelectorAll(".js-manual").forEach(el => { el.href = SITE.manual; });
+  document.getElementById("year").textContent = String(new Date().getFullYear());
+
+  /* ---- live keyboard map: C-2 = start/stop, C#2 up = patterns 00, 01, 02 ... ---- */
+  const keysEl = document.getElementById("keys");
+  const names = ["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"];
+  const isBlack = s => [1,3,6,8,10].includes(s % 12);
+  const hex2 = n => n.toString(16).toUpperCase().padStart(2, "0");
+  const total = 24;                       // C-2 .. B-3
+  const whites = []; const blacks = [];
+  let whiteIndex = 0;
+  for (let s = 0; s < total; s++) {
+    const octave = 2 + Math.floor(s / 12);
+    const name = names[s % 12] + octave;
+    const pattern = s - 1;                // -1 = start/stop
+    const el = document.createElement("button");
+    el.type = "button";
+    el.dataset.pattern = String(pattern);
+    el.setAttribute("aria-label", pattern < 0 ? name + ": start or stop" : name + ": pattern " + hex2(pattern));
+    el.innerHTML = '<span class="p">' + (pattern < 0 ? "▶■" : hex2(pattern)) + '</span><span class="n">' + name + "</span>";
+    if (isBlack(s)) {
+      el.className = "bkey";
+      el.style.left = "calc(" + (whiteIndex / 14 * 100) + "% - " + (100 / 14 * 0.31) + "%)";
+      blacks.push(el);
+    } else {
+      el.className = "wkey" + (pattern < 0 ? " start" : "");
+      whites.push(el);
+      whiteIndex++;
+    }
+  }
+  const row = document.createElement("div");
+  row.className = "white-keys";
+  whites.forEach(w => row.appendChild(w));
+  keysEl.appendChild(row);
+  blacks.forEach(b => keysEl.appendChild(b));
+
+  // a tiny simulation of the transport, using the app's own timing:
+  // speed 6 at 125 BPM = 6 ticks of 20 ms = 120 ms per row, 64 rows per pattern
+  let playing = false, current = 0, queued = -1, rowPos = 0, timer = null;
+  const left = document.getElementById("lcd-left");
+  const right = document.getElementById("lcd-right");
+  const all = () => keysEl.querySelectorAll("button");
+  function render() {
+    all().forEach(k => {
+      const p = Number(k.dataset.pattern);
+      k.classList.toggle("is-playing", playing && p === current);
+      k.classList.toggle("is-queued", queued >= 0 && p === queued);
+    });
+    if (playing) {
+      left.innerHTML = '<span class="play">PLAY</span> ' + hex2(current) + ":" + hex2(rowPos) + (queued >= 0 ? " &gt;" + hex2(queued) : "");
+    } else {
+      left.textContent = "STOPPED · PATTERN " + hex2(current);
+    }
+    right.textContent = "SPEED 6 · BPM 125";
+  }
+  function tick() {
+    rowPos = (rowPos + 1) % 64;
+    if (queued >= 0) { current = queued; queued = -1; }   // NEXT ROW (LEGATO): keep the row position
+    render();
+  }
+  keysEl.addEventListener("click", e => {
+    const k = e.target.closest("button");
+    if (!k) return;
+    const p = Number(k.dataset.pattern);
+    if (p < 0) {
+      playing = !playing;
+      if (playing) { rowPos = 0; queued = -1; timer = setInterval(tick, 120); }
+      else { clearInterval(timer); timer = null; queued = -1; }
+    } else if (playing) {
+      queued = (p === current) ? -1 : p;
+    } else {
+      current = p;
+    }
+    render();
+  });
+  render();
+})();
+</script>

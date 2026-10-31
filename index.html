@@ -24,7 +24,7 @@
   "applicationCategory": "MultimediaApplication",
   "applicationSubCategory": "Music tracker",
   "operatingSystem": "Windows 10, Windows 11",
-  "softwareVersion": "0.5.1",
+  "softwareVersion": "0.5.2",
   "url": "https://elcrispo76.github.io/Four-Tracker/",
   "downloadUrl": "https://github.com/elcrispo76/Four-Tracker/releases",
   "image": "https://elcrispo76.github.io/Four-Tracker/images/tracks.jpg",
@@ -247,6 +247,11 @@ section { padding-block: 44px; }
 .download-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 #effects .download-grid { align-items: start; }
 #effects .fx-second { margin-top: 28px; }
+#effects .bundle { margin-bottom: 28px; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; outline: 2px solid var(--red); outline-offset: -2px; }
+#effects .bundle h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; letter-spacing: 0.03em; }
+#effects .bundle p { margin-top: 8px; color: var(--ink-soft); }
+#effects .bundle ul { margin: 10px 0 0; padding-left: 20px; color: var(--ink-soft); font-size: 0.95rem; }
+@media (max-width: 760px) { #effects .bundle { grid-template-columns: minmax(0, 1fr); } }
 .dl-card { padding: 22px; display: grid; gap: 14px; align-content: start; }
 .dl-card h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.03em; }
 .spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 0.95rem; margin: 0; }
@@ -317,7 +322,7 @@ footer .wrap { display: grid; gap: 8px; }
         <p class="lede">A free sample tracker in the style of ProTracker and FastTracker 2, with 1 to 16 tracks, that you play live: every key on your MIDI keyboard is a pattern.</p>
         <div class="actions">
           <a class="btn btn-red js-download" href="#download">
-            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.5.1</span> beta</small></span>
+            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.5.2</span> beta</small></span>
           </a>
           <a class="btn btn-light js-donate" href="#donate">
             <span class="btn-text">DONATE<small>Keep it going</small></span>
@@ -395,7 +400,7 @@ footer .wrap { display: grid; gap: 8px; }
         <article class="panel feature">
           <span class="cell">VST3 FX · MIDI OUT</span>
           <h3>Standalone or in your DAW</h3>
-          <p>Run it on its own with ASIO and two VST3 effects per track, and chain one track into another track's effects. Or load it as a VST3 instrument. MIDI instruments play your hardware or software synths from the pattern.</p>
+          <p>Run it on its own with ASIO, three VST3 effects per track and three on the master, and chain one track into another track's effects. Or load it as a VST3 instrument. MIDI instruments play your hardware or software synths from the pattern.</p>
         </article>
       </div>
     </div>
@@ -426,14 +431,14 @@ footer .wrap { display: grid; gap: 8px; }
       </div>
       <div class="download-grid">
         <div class="panel dl-card">
-          <h3>FOUR TRACKER <span class="js-version">v0.5.1</span> <span class="badge">BETA</span></h3>
+          <h3>FOUR TRACKER <span class="js-version">v0.5.2</span> <span class="badge">BETA</span></h3>
           <dl class="spec">
             <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
             <dt>Includes</dt><dd>Standalone app (ASIO, Windows Audio / WASAPI, DirectSound) with VST3 effects, VST3 plugin 64-bit and 32-bit, user manual (PDF), Four Tracker Sample Pack (88 WAV sounds, free to use in your music)</dd>
             <dt>Hosts</dt><dd>Any DAW that loads VST3 instruments</dd>
             <dt>Price</dt><dd>Free</dd>
           </dl>
-          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.5.1-share-fx.exe</small></span></a></div>
+          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD INSTALLER<small class="js-filename">FourTracker-Setup-0.5.2-share-fx.exe</small></span></a></div>
           <p class="note">Windows may say "Windows protected your PC" because the installer isn't signed. Click <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
         <div class="panel dl-card">
@@ -450,34 +455,85 @@ footer .wrap { display: grid; gap: 8px; }
     <div class="wrap">
       <div class="section-head">
         <h2>FREE EFFECTS</h2>
-        <p>Separate VST3 effects for Four Tracker and any DAW, in the same look. Each has its own installer, which asks which VST3 folder to use.</p>
+        <p>Five VST3 effects for Four Tracker and any DAW, in the same look. They come together in one installer, the Effects Bundle, which asks which VST3 folder to use.</p>
+      </div>
+      <div class="panel bundle">
+        <div>
+          <h3>EFFECTS BUNDLE <span class="js-bundle-version">v1.0.0</span></h3>
+          <p>All five effects in one installer. Tick the ones you want, in 64-bit and/or 32-bit. Afterwards, rescan your plugins (in Four Tracker: FX, SCAN).</p>
+          <ul>
+            <li><b>Breakbeat Processor</b>: 8 step breakbeat slicer in time with the song</li>
+            <li><b>FX Processor</b>: filter, PW gate, chorus, LFO, delay, reverb</li>
+            <li><b>FX Processor 2</b>: phaser, flanger, ring modulator</li>
+            <li><b>Dynamics Processor</b>: transient shaper, compressor and saturation, with AUTO</li>
+            <li><b>Graphic EQ</b>: 10 bands, +12 / -12 dB, the sound follows the curve</li>
+          </ul>
+        </div>
+        <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">DOWNLOAD BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
       </div>
       <div class="download-grid">
         <figure class="shot"><img src="images/breakbeat-processor.png" alt="Breakbeat Processor: 8 step pads, tools and knobs." loading="lazy" width="940" height="560"><figcaption><b>BREAKBEAT PROCESSOR</b>Slices 8 to 64 rows (1/2 to 4 bars) of a track, 8 steps.</figcaption></figure>
         <div class="panel dl-card">
-          <h3>BREAKBEAT PROCESSOR <span class="js-bb-version">v1.0.0</span></h3>
+          <h3>BREAKBEAT PROCESSOR <span class="js-bundle-version">v1.0.0</span></h3>
           <p>Put it on a break, a beat or a bassline. Each of the 8 steps can retrigger the track from one of its four quarters (1/4 - 4/4) and let it play on, like putting a sample in again on that row, or play it backwards, stop it or bit-crush it. It follows the tempo and position of Four Tracker or your DAW, and in hosts that send no tempo it runs on its own TEMPO from the moment the sound starts. READ AHEAD lets it read the whole part of the track before it is heard, in DAWs with delay compensation.</p>
           <dl class="spec">
             <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
             <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
-            <dt>Price</dt><dd>Free</dd>
+            <dt>Price</dt><dd>Free, in the Effects Bundle</dd>
           </dl>
-          <div><a class="btn btn-red js-bb-download" href="#effects"><span class="btn-text">DOWNLOAD VST3<small class="js-bb-filename">BreakbeatProcessor-Setup-1.0.0.exe</small></span></a></div>
-          <p class="note">Installs into the VST3 folder you choose (standard: Common Files\VST3). Rescan your plugins afterwards (in Four Tracker: FX, SCAN).</p>
+          <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">GET IT IN THE BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
         </div>
       </div>
       <div class="download-grid fx-second">
         <figure class="shot"><img src="images/fx-processor.png" alt="FX Processor: filter, PW, LFO, chorus, delay and reverb panels with knobs." loading="lazy" width="1100" height="648"><figcaption><b>FX PROCESSOR</b>Filter, PW gate, chorus, LFO, delay and reverb.</figcaption></figure>
         <div class="panel dl-card">
-          <h3>FX PROCESSOR <span class="js-fx-version">v1.0.0</span></h3>
+          <h3>FX PROCESSOR <span class="js-bundle-version">v1.0.0</span></h3>
           <p>Six effects in one: a resonant FILTER (low-, band- or high-pass), a PW trance gate in time with the song, a stereo CHORUS, a tempo-synced DELAY with tone and ping-pong, and a REVERB. The LFO (sine, triangle, saw, square or sample &amp; hold, 1/16 to 4 bars or free) moves the filter cutoff and the PW width. 13 presets, from TRANCE GATE and WOBBLE to DUB DELAY and SPACE CHORUS.</p>
           <dl class="spec">
             <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
             <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
-            <dt>Price</dt><dd>Free</dd>
+            <dt>Price</dt><dd>Free, in the Effects Bundle</dd>
           </dl>
-          <div><a class="btn btn-red js-fx-download" href="#effects"><span class="btn-text">DOWNLOAD VST3<small class="js-fx-filename">FxProcessor-Setup-1.0.0.exe</small></span></a></div>
-          <p class="note">Follows the tempo of Four Tracker or your DAW. Installs into the VST3 folder you choose.</p>
+          <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">GET IT IN THE BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/fx-processor-2.png" alt="FX Processor 2: phaser, flanger and ring modulator panels with knobs." loading="lazy" width="1100" height="414"><figcaption><b>FX PROCESSOR 2</b>Phaser, flanger and ring modulator.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>FX PROCESSOR 2 <span class="js-bundle-version">v1.0.0</span></h3>
+          <p>Three more effects in one: a PHASER with 4 to 12 stages and feedback, a FLANGER from jet whoosh to hollow metal (plus or minus feedback), and a RING MODULATOR from tremolo and robot voices to bells. Each has its own LFO, free or in time with the song (1/16 to 4 bars). 14 presets.</p>
+          <dl class="spec">
+            <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
+            <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
+            <dt>Price</dt><dd>Free, in the Effects Bundle</dd>
+          </dl>
+          <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">GET IT IN THE BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/dynamics-processor.png" alt="Dynamics Processor: instrument buttons, AUTO, transient, compressor and saturation panels, compressor curve and meters." loading="lazy" width="1100" height="690"><figcaption><b>DYNAMICS PROCESSOR</b>Transient shaper, compressor and saturation, with AUTO.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>DYNAMICS PROCESSOR <span class="js-bundle-version">v1.0.0</span></h3>
+          <p>A TRANSIENT shaper (more or less punch, longer or shorter tails), a COMPRESSOR with curve and meters, and a 2 x oversampled SATURATION (tape, tube or clip) that keeps the level. Pick the instrument on the track (kick, snare, hihats, percussion, bass, synth/arp, pads or voice), play it and click AUTO: it listens for 4 seconds and fixes the beat by setting all three. Then turn any knob you like. 15 presets.</p>
+          <dl class="spec">
+            <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
+            <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
+            <dt>Price</dt><dd>Free, in the Effects Bundle</dd>
+          </dl>
+          <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">GET IT IN THE BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/graphic-eq.png" alt="Graphic EQ: a dB ruler, 10 black bars with round knobs and a white curve through them." loading="lazy" width="1120" height="462"><figcaption><b>GRAPHIC EQ</b>10 bands, drag the knobs and the curve follows.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>GRAPHIC EQ <span class="js-bundle-version">v1.0.0</span></h3>
+          <p>A 10 band graphic EQ (60 Hz to 16 kHz, +12 / -12 dB). Drag the round knobs, or drag sideways to draw a curve over several bands; the white line follows. What you see is what you hear: neighbouring bands don't add up, so the sound at every band is exactly what its knob says. 14 presets, from BASS BOOST and SMILE to TELEPHONE and LO-FI.</p>
+          <dl class="spec">
+            <dt>Format</dt><dd>VST3, Windows 64-bit and 32-bit</dd>
+            <dt>Hosts</dt><dd>Four Tracker (FX version) and any DAW that loads VST3 effects</dd>
+            <dt>Price</dt><dd>Free, in the Effects Bundle</dd>
+          </dl>
+          <div><a class="btn btn-red js-bundle-download" href="#effects"><span class="btn-text">GET IT IN THE BUNDLE<small class="js-bundle-filename">FourTrackerEffects-Bundle-1.0.0.exe</small></span></a></div>
         </div>
       </div>
     </div>
@@ -487,7 +543,7 @@ footer .wrap { display: grid; gap: 8px; }
     <div class="wrap">
       <div class="section-head">
         <h2>STATUS: BETA</h2>
-        <p>Four Tracker <span class="js-version">v0.5.1</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
+        <p>Four Tracker <span class="js-version">v0.5.2</span> is beta software. It works and it is tested, but it is new and only a few people have used it so far. Expect bugs, save your modules often, and use it at your own risk.</p>
       </div>
       <div class="status-grid">
         <div class="panel status-card">
@@ -537,20 +593,17 @@ footer .wrap { display: grid; gap: 8px; }
 <script>
 /* ===== Edit these links before you put the site online ===== */
 const SITE = {
-  version:  "0.5.1",
+  version:  "0.5.2",
   // Where the installer is hosted, e.g. a GitHub release:
-  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.5.1-share-fx.exe"
-  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.5.1/FourTracker-Setup-0.5.1-share-fx.exe",
+  // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.5.2-share-fx.exe"
+  download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.5.2/FourTracker-Setup-0.5.2-share-fx.exe",
   // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
   donate:   "https://ko-fi.com/fourtracker",
   donateLabel: "Any amount",
   manual:   "Four-Tracker-User-Manual.pdf",
-  // Breakbeat Processor (the separate effect): its installer on GitHub
-  bbVersion:  "1.0.0",
-  bbDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/breakbeat-1.0.0/BreakbeatProcessor-Setup-1.0.0.exe",
-  // FX Processor (the separate effect): its installer on GitHub
-  fxVersion:  "1.0.0",
-  fxDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/fxprocessor-1.0.0/FxProcessor-Setup-1.0.0.exe"
+  // Effects Bundle (all five effects in one installer): its installer on GitHub
+  bundleVersion:  "1.0.0",
+  bundleDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/effects-bundle-1.0.0/FourTrackerEffects-Bundle-1.0.0.exe"
 };
 /* ============================================================ */
 
@@ -563,12 +616,9 @@ const SITE = {
   document.querySelectorAll(".js-download").forEach(el => SITE.download ? ext(el, SITE.download) : null);
   document.querySelectorAll(".js-donate").forEach(el => SITE.donate ? ext(el, SITE.donate) : null);
   document.querySelectorAll(".js-manual").forEach(el => { el.href = SITE.manual; });
-  document.querySelectorAll(".js-bb-version").forEach(el => el.textContent = "v" + SITE.bbVersion);
-  document.querySelectorAll(".js-bb-filename").forEach(el => el.textContent = decodeURIComponent (SITE.bbDownload.split("/").pop()));
-  document.querySelectorAll(".js-bb-download").forEach(el => SITE.bbDownload ? ext(el, SITE.bbDownload) : null);
-  document.querySelectorAll(".js-fx-version").forEach(el => el.textContent = "v" + SITE.fxVersion);
-  document.querySelectorAll(".js-fx-filename").forEach(el => el.textContent = decodeURIComponent (SITE.fxDownload.split("/").pop()));
-  document.querySelectorAll(".js-fx-download").forEach(el => SITE.fxDownload ? ext(el, SITE.fxDownload) : null);
+  document.querySelectorAll(".js-bundle-version").forEach(el => el.textContent = "v" + SITE.bundleVersion);
+  document.querySelectorAll(".js-bundle-filename").forEach(el => el.textContent = decodeURIComponent (SITE.bundleDownload.split("/").pop()));
+  document.querySelectorAll(".js-bundle-download").forEach(el => SITE.bundleDownload ? ext(el, SITE.bundleDownload) : null);
   document.getElementById("year").textContent = String(new Date().getFullYear());
 
   /* ---- live keyboard map: C-2 = start/stop, C#2 up = patterns 00, 01, 02 ... ---- */
