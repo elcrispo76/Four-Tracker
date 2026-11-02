@@ -1,0 +1,43 @@
+# Builds the Mac version of the Four Tracker Effects Bundle on GitHub's Mac machines:
+#   FourTrackerEffects-Bundle-<version>-mac.pkg  (all five effects as VST3 + Audio Unit)
+# Start it by hand: Actions > "Mac build: effects bundle" > Run workflow. The .pkg is added to the release
+# you type in (leave the field empty to only keep it under the run's "Artifacts").
+# It also runs by itself when an effects release (tag effect-bundle-...) is published.
+# Never VST2.
+name: "Mac build: effects bundle"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Add the .pkg to this release (empty = don't)"
+        required: false
+        default: "effect-bundle-1.0.0"
+  release:
+    types: [published]
+
+jobs:
+  mac:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'effect-bundle')
+    runs-on: macos-14
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the effects for Mac
+        run: bash effects/effects-bundle/build-mac-bundle.sh
+
+      - name: Keep the .pkg (download it under the run's "Artifacts")
+        uses: actions/upload-artifact@v4
+        with:
+          name: FourTrackerEffects-mac
+          path: effects/effects-bundle/dist-mac/*.pkg
+
+      - name: Add the .pkg to the release
+        if: github.event_name == 'release' || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+        run: gh release upload "$TAG" effects/effects-bundle/dist-mac/*.pkg --clobber --repo "$GITHUB_REPOSITORY"
