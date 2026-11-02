@@ -1,0 +1,31 @@
+RONNIES VST3 EKSPERIMENTER
+==========================
+
+JUCE\                  faelles for alle plugins (skal ligge her)
+breakbeat-processor\   Breakbeat Processor
+fx-processor\          FX Processor (Filter, PW, Chorus, LFO, Delay, Reverb)
+fx-processor-2\        FX Processor 2 (Phaser, Flanger, Ring Mod)
+dynamics-processor\    Dynamics Processor (transient + kompressor + saturation, AUTO)
+graphic-eq\            Graphic EQ (10 baand, +12/-12 dB)
+effects-bundle\        EN installer med alle effekterne (se nederst)
+
+Saadan bygger du et plugin:
+  1. Aabn plugin-mappen (fx. fx-processor).
+  2. Skriv cmd i adresselinjen og tryk Enter.
+  3. build-windows.bat        -> dist\64-bit og dist\32-bit (VST3)
+     build-installer.bat      -> dist\...-Setup-1.0.0.exe
+     build-windows-vst2.bat   -> dist-vst2 (VST2, KUN til dig selv - kopier SDKs-mappen fra Four Tracker ind i "Ronnies VST3 eksperimenter" foerst)
+
+Bitdefender: tilfoej mappen som undtagelse, hvis den fjerner filer.
+
+Bundle (alle effekter i een installer):
+  1. Koer build-windows.bat i hver plugin-mappe (VST3 share builds).
+  2. Koer effects-bundle\build-bundle.bat
+     -> effects-bundle\dist\FourTrackerEffects-Bundle-1.0.0.exe
+  Plugins der ikke er bygget, bliver bare udeladt. Kun VST3 - aldrig VST2.
+
+Mac (VST3 + Audio Unit, ingen VST2):
+  Paa en Mac:   bash effects-bundle/build-mac-bundle.sh
+                -> effects-bundle/dist-mac/FourTrackerEffects-Bundle-1.0.0-mac.pkg
+  Uden Mac:     GitHub bygger den: Actions > "Mac build: effects bundle" > Run workflow
+                (effekt-mapperne ligger i mappen "effects" i four-tracker repoet).
