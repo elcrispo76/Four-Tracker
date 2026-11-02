@@ -105,6 +105,7 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 | Ctrl+F3 / F4 / F5 | Cut / copy / paste the block: the whole pattern, all 4 channels and all rows (64 rows = 4 bars) |
 | Shift+F3 / F4 / F5 | Cut / copy / paste track (one whole channel) |
 | Ctrl+Z / Ctrl+Y | Undo / redo pattern edits |
+| F3 / F4 | REC / STOP (the program only): record the jam, stop and save it |
 | F9 / F10 / F11 / F12 | Tracks / Instruments / Sample Edit / MIDI-Audio page |
 
 Mouse tricks:
@@ -169,6 +170,18 @@ The effect numbers follow **FastTracker 2**. 00-0F are the classic ProTracker/MO
   - **MIX** (like OctaMED): pick another slot from the list, and its sample is mixed into this one from the cursor
     (or the start of the selection). It keeps its own pitch, can make the sample longer, turns it stereo if either
     is stereo, and is scaled down only if the result would clip,
+  - **RE-SAMPLE:** turns a pattern, or part of it, into a sample in the selected slot (pick an empty one). Choose the
+    **PATTERN**, then **WHOLE PATTERN** or **ROWS** (FROM ROW / TO ROW), and **ALL TRACKS** or **CHOOSE TRACKS** (tick
+    the tracks you want in the 16 squares). **USE BLOCK** takes the rows and tracks of the block marked in the pattern.
+    **ENDING:** **LOOP** (the default) makes the sample exactly as long as the rows: they are played twice in a row and the
+    second time is kept, which is exactly what you hear when the pattern loops (new notes cut the old ones, and only
+    what really rings on, like a reverb tail, goes over the start), so it loops without a seam; the loop points are set
+    over the whole sample. **CUT** is exactly as long as the rows, cut off at the end. **RING OUT** lets the sound ring
+    out after the last row (up to 4 seconds, until it is silent). **NORMALIZE** turns the loudest point up to just
+    under full scale. Enter re-samples, Esc cancels. It is rendered in the background in a
+    second engine, so the song that plays isn't disturbed, at the program's sample rate, in stereo, before MASTER
+    volume (turned down only if it would clip). The slot gets a name like **RS P02 ALL** or **RS P02 1+3**. VST
+    effects and MIDI instruments are not in the sample,
   - zoom and scroll. Ctrl+wheel also zooms.
   - **Keyboard:** click the waveform first (a white frame shows it is active), then **Ctrl+A** selects the whole
     sample, **Ctrl+C / Ctrl+X / Ctrl+V** copy, cut and paste (paste goes in at the cursor), **Delete** removes the
@@ -230,16 +243,40 @@ now called **SYNTH 1**).
 - The sound commands `0X` / `0Z` / `0Y` / `0V` work on SYNTH 2 too. Knobs, patch name and MIDI knobs are saved in the
   module.
 
+## REC: record your jam
+
+In the program (not in the VST3 / VST2 plugin, where the DAW records) **REC** and **STOP** sit in the title bar,
+also on **F3** and **F4**. REC records everything you hear while you jam: the tracks, their VST effects, the master
+effects, MASTER volume and FADE, the pattern switching from the MIDI keyboard and CHORD. It is written straight to a
+file in the background, so a long jam neither fills the memory nor makes the sound stutter. The button shows the time.
+
+STOP ends it and opens a menu: **SAVE AS MP3** (320 kbps), **SAVE AS FLAC** (lossless, 24-bit) or **SAVE AS WAV**
+(24-bit), **LISTEN** (opens it in your computer's player), **THROW AWAY AND RECORD AGAIN** (made a mistake? just take
+it again) or **THROW AWAY**. While a take waits to be saved, the STOP button says **SAVE** and opens the same menu;
+REC asks before it throws an unsaved take away. Jams are saved in `Documents\Four Tracker\Recordings`. If the program
+closes before a take is saved, it is kept there as `Unsaved jam <date>.wav`. Sound from external MIDI synths is
+not in the recording (it doesn't go through Four Tracker). MP3 uses the LAME encoder (LGPL), built in.
+
 ## Saving
 
 - **Modules (.ftm):** SAVE MODULE writes one compressed file with everything in the song: all patterns,
   all samples, instrument settings, speed, BPM, loop and mixer. LOAD MODULE reads `.ftm` files and also
   old `.ftps` pattern sets (those hold patterns only, so the loaded samples are kept). You can also drop
   a `.ftm` file on the window.
+- **Single patterns (.ftpat):** SAVE PATTERN (Song / Pattern page) saves the pattern in view together with the
+  instruments and samples it uses, so it sounds the same anywhere: to share with others, or to keep a fill, a
+  beat or a break for another song. They go to `Documents\Four Tracker\Patterns`. LOAD PATTERN puts one into the
+  pattern in view if it is empty, otherwise into the next empty pattern (it never writes over one; Ctrl+Z
+  undoes it). Its instruments go into empty slots and the notes are renumbered to match; a sound that is
+  already in the song is used again instead of loaded twice. **The song keeps its own SPEED and BPM:** tempo
+  commands (Fxx) in the pattern are taken out. A pattern with more tracks than the song adds tracks.
 - **NEW MODULE** asks: **Empty** (clears every pattern and sample), **Demo song** (loads the built-in demo
   again) or **Cancel**.
 - **Standalone app:** always starts with the demo song. MIDI mapping, master volume and audio settings
-  are remembered, but the song is not, so save your work as a module before closing.
+  are remembered, but the song is not, so save your work as a module before closing. If the song has changes
+  that aren't saved (since the last SAVE, LOAD or NEW: patterns, instruments, samples, tempo, tracks or mixer),
+  closing the program asks first: **Save...** (saves the module, then closes), **Don't save** or **Cancel**.
+  It also says when a REC recording isn't saved.
 - **Plugin:** the whole song is stored in your DAW project and comes back when you open it.
 - **Demo folder:** the first time the editor opens, it creates `Documents\Four Tracker\Demo` with
   `Demo Song.ftm` and the demo sounds as WAV files in `Samples`. LOAD / SAVE start in `Documents\Four Tracker`.
@@ -327,10 +364,10 @@ so there are no folders, just press SCAN. Mac keyboards may need **fn** for the 
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.5.2-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.5.2-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.2-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.2-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.5.3-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.3-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.3-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.3-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes

@@ -63,6 +63,7 @@ void TitleBar::paint (Graphics& g)
     if (PixelFont::getWidth (what, 15.0f) > statusArea.getWidth())          // short form when the title bar is full
         what = n <= kVisibleChannels ? String (n) + " TRACKS"
                                      : String (first + 1) + "-" + String (jmin (n, first + kVisibleChannels)) + " OF " + String (n);
+    if (PixelFont::getWidth (what, 15.0f) > statusArea.getWidth()) return;   // no room at all (REC / MASTER / TRACKS fill the bar)
     Theme::text (g, what, statusArea, 15.0f, Theme::screenText, Justification::centredLeft);
     // the status text (cursor, step ...) only when it fits whole next to it
     const float room = statusArea.getWidth() - PixelFont::getWidth (what, 15.0f) - 22.0f;

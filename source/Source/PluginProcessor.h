@@ -9,6 +9,7 @@
 #include "Instrument.h"
 
 class FxHost;   // VST effect hosting (FX build only)
+#include "JamRecorder.h"
 
 class FourTrackerProcessor : public juce::AudioProcessor,
                              public juce::ChangeBroadcaster,
@@ -51,6 +52,24 @@ public:
         and notifies the UI. */
     void instrumentChanged (int slot);
 
+    /** RE-SAMPLE: which pattern, which rows and which tracks to turn into a sample. */
+    struct ResampleRequest
+    {
+        int pattern = 0;
+        int fromRow = 0, toRow = 63;        // inclusive
+        juce::uint32 tracks = 0xffffu;      // bit n = track n+1
+        /** How the sample ends. LOOP: exactly as long as the rows, and what still sounds at the end is
+            laid over the start (as when the pattern loops), so it loops without a seam; the loop is set.
+            CUT: exactly as long as the rows, cut off. RING OUT: longer, the sound rings out (up to 4 s). */
+        enum Ending { loopEnd = 0, cutEnd = 1, ringOut = 2 };
+        int ending = loopEnd;
+        bool normalise = false;             // loudest point to just under full scale
+    };
+    /** Plays the rows offline in a second engine (the song that plays now isn't disturbed) and puts
+        the result into `slot` as a stereo sample. VST effects and MIDI instruments are not in it.
+        Returns a message for the screen; `ok` says whether the slot got a sample. Message thread. */
+    juce::String resampleInto (int slot, const ResampleRequest& request, bool& ok);
+
     // ---- synth MIDI LEARN: a knob on the MIDI keyboard moves one synth slider -------
     /** MIDI LEARN target for SYNTH 2's knob n: kSynth2Knob + n (SYNTH 1's sliders are 0..7). */
     static constexpr int kSynth2Knob = 100;
@@ -92,6 +111,19 @@ public:
     bool saveModule (const juce::File& file);
     juce::String loadModule (const juce::File& file);
 
+    /** A single pattern (.ftpat): its rows and the instruments (with their samples) it uses, so it can be
+        shared and put into another song. Returns an error message or empty. */
+    juce::String savePattern (int pattern, const juce::File& file);
+    /** Loads a .ftpat into `target`, which must be empty. Its instruments go into empty slots (one that is
+        already loaded is used again) and the notes are renumbered to match. The song keeps its own
+        SPEED and BPM: tempo commands (Fxx) are taken out. Adds tracks if the pattern has more.
+        Returns a message for the screen. */
+    juce::String loadPattern (const juce::File& file, int target, bool& ok);
+    /** The first empty pattern from `from` on (wrapping round), or -1. */
+    int findEmptyPattern (int from);
+    /** How many tracks a pattern uses (the last track with anything in it). */
+    int patternTracksUsed (int pattern);
+
     /** Documents/Four Tracker - default place for modules. */
     static juce::File getUserFolder();
     /** Creates Documents/Four Tracker/Demo with "Demo Song.ftm" and the demo
@@ -109,12 +141,25 @@ public:
     /** True if a track has anything in any pattern. */
     bool trackHasNotes (int channel);
 
+    /** Unsaved changes: the song (patterns, instruments, samples, tempo, tracks, mixer) is compared with how it
+        was at the last SAVE / LOAD / NEW, so closing the program can ask first. */
+    void markSaved();
+    bool hasUnsavedChanges() const;
+    /** The module file last saved or loaded (empty after NEW). */
+    juce::File currentModuleFile;
+
+    /** REC: records what you hear while you jam (see JamRecorder). */
+    JamRecorder& getRecorder() noexcept { return recorder; }
+
     /** UI preferences kept with the session. */
     bool hexMode = true;
     bool chordMode = false;   // CHORD: held note keys go to the next tracks
     int  selectedInstrument = 1;
 
 private:
+    JamRecorder recorder;
+    juce::uint64 songFingerprint() const;
+    juce::uint64 savedFingerprint = 0;
     void timerCallback() override;
 
     void writeSong (juce::ValueTree& t) const;

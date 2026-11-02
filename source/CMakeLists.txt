@@ -6,7 +6,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Mac CPUs")
 endif()
 
-project(FourTracker VERSION 0.5.2 LANGUAGES C CXX)
+project(FourTracker VERSION 0.5.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -139,6 +139,8 @@ target_sources(FourTracker PRIVATE
     Source/UI/SettingsPage.cpp
     Source/UI/SampleBrowser.cpp
     Source/FxHost.cpp
+    Source/JamRecorder.cpp
+    Source/StandaloneApp.cpp
     Source/UI/FxPage.cpp)
 
 target_include_directories(FourTracker PRIVATE Source)
@@ -199,8 +201,26 @@ if(FOURTRACKER_HEADLESS_CHECK)
         JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)
 endif()
 
+# LAME 3.100 (LGPL, ThirdParty/lame): the MP3 encoder for REC, so a jam can be saved as MP3
+file(GLOB FT_LAME_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/lame/libmp3lame/*.c)
+add_library(ft_lame STATIC ${FT_LAME_SOURCES})
+target_include_directories(ft_lame
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/lame ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/lame/libmp3lame
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/lame/include)
+target_compile_definitions(ft_lame PRIVATE HAVE_CONFIG_H)
+set_target_properties(ft_lame PROPERTIES POSITION_INDEPENDENT_CODE ON C_STANDARD 99)
+if(MSVC)
+    target_compile_options(ft_lame PRIVATE /W0)
+else()
+    target_compile_options(ft_lame PRIVATE -w)
+endif()
+
+# the program asks before closing with unsaved changes: our own standalone app (Source/StandaloneApp.cpp)
+target_compile_definitions(FourTracker PUBLIC JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
+
 target_link_libraries(FourTracker
     PRIVATE
+        ft_lame
         juce::juce_audio_utils
         juce::juce_audio_formats
         juce::juce_audio_devices
@@ -231,7 +251,7 @@ if(FOURTRACKER_BUILD_TESTS)
         target_compile_definitions(FourTrackerTests PRIVATE
             JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)
     endif()
-    target_link_libraries(FourTrackerTests PRIVATE
+    target_link_libraries(FourTrackerTests PRIVATE ft_lame
         juce::juce_audio_utils juce::juce_audio_formats juce::juce_audio_devices juce::juce_audio_processors
         juce::juce_recommended_config_flags)
 endif()

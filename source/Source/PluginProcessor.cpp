@@ -11,7 +11,7 @@ using namespace ft;
 namespace ids
 {
     static const juce::Identifier root ("FOURTRACKER"), patterns ("PATTERNS"), pat ("P"), insts ("INSTRUMENTS"), inst ("I"),
-        mixer ("MIXER"), chan ("CH"), patternSet ("PATTERNSET"), module ("MODULE");
+        mixer ("MIXER"), chan ("CH"), patternSet ("PATTERNSET"), module ("MODULE"), patternFile ("PATTERNFILE");
 }
 
 FourTrackerProcessor::FourTrackerProcessor()
@@ -45,6 +45,10 @@ FourTrackerProcessor::FourTrackerProcessor()
         };
     }
    #endif
+
+    if (wrapperType == wrapperType_Standalone) JamRecorder::rescueLeftover();
+    else recorder.setUniqueTakeName();
+    markSaved();      // the demo song as it starts counts as unchanged
 
     startTimer (1000);
     knobPump.tick = [this] { applyMidiKnobs(); };
@@ -110,6 +114,7 @@ void FourTrackerProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                     hostBpm = *b;
 
     engine.process (buffer, midi, hostBpm);
+    if (wrapperType == wrapperType_Standalone) recorder.process (buffer);   // REC (the program only): what you hear, after every effect
     midi.clear();
     midi.swapWith (engine.midiOut);       // notes from MIDI instruments go out (device or DAW)
     engine.midiOut.clear();
@@ -131,6 +136,239 @@ void FourTrackerProcessor::instrumentChanged (int slot)
     in.sanitise();
     engine.publishInstrument (slot, in.makeSnapshot());
     sendChangeMessage();
+}
+
+// ---------------------------------------------------------------------------
+// unsaved changes
+// ---------------------------------------------------------------------------
+
+juce::uint64 FourTrackerProcessor::songFingerprint() const
+{
+    // FNV-1a over everything that a module file holds
+    juce::uint64 h = 1469598103934665603ull;
+    auto add = [&h] (const void* data, size_t n)
+    {
+        const auto* p = static_cast<const uint8_t*> (data);
+        for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ull; }
+    };
+    auto addInt = [&add] (juce::int64 v) { add (&v, sizeof (v)); };
+    auto& eng = const_cast<TrackerEngine&> (engine);
+    {
+        const juce::ScopedLock sl (eng.getDataLock());
+        for (int p = 0; p < kMaxPatterns; ++p)
+        {
+            const auto& pat = eng.getPattern (p);
+            addInt (pat.getNumRows());
+            add (&pat.cells[0][0], sizeof (Cell) * (size_t) pat.getNumRows() * kNumChannels);
+        }
+    }
+    addInt (engine.speed.load()); addInt (engine.bpm.load()); addInt (engine.loopPattern.load()); addInt (engine.numChannels.load());
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        addInt (engine.mix[c].volume.load()); addInt (engine.mix[c].pan.load()); addInt (engine.mix[c].pitch.load());
+        addInt (engine.mix[c].mute.load()); addInt (engine.mix[c].solo.load());
+    }
+    for (int i = 1; i < kNumInstruments; ++i)
+    {
+        const auto& in = instruments[(size_t) i];
+        add (in.name.toRawUTF8(), in.name.getNumBytesAsUTF8());
+        addInt ((juce::int64) (juce::pointer_sized_int) in.data.get());     // sample edits make a new SampleData
+        const auto& p = in.params;
+        for (juce::int64 v : { (juce::int64) p.volume, (juce::int64) p.transpose, (juce::int64) p.fineTune, (juce::int64) p.loop,
+                               (juce::int64) p.pingPong, (juce::int64) p.loopBackward, (juce::int64) p.reverse, (juce::int64) p.start,
+                               (juce::int64) p.end, (juce::int64) p.loopStart, (juce::int64) p.loopEnd, (juce::int64) p.synth,
+                               (juce::int64) p.synthWave, (juce::int64) p.attack, (juce::int64) p.decay, (juce::int64) p.sustain,
+                               (juce::int64) p.release, (juce::int64) p.cutoff, (juce::int64) p.resonance, (juce::int64) p.distortion,
+                               (juce::int64) p.accent, (juce::int64) p.synth2, (juce::int64) p.midi, (juce::int64) p.midiChannel,
+                               (juce::int64) p.midiProgram })
+            addInt (v);
+        if (p.synth2) { const auto t = ft::synth2::toString (p.s2); add (t.toRawUTF8(), t.getNumBytesAsUTF8()); }
+    }
+    return h;
+}
+
+void FourTrackerProcessor::markSaved()        { savedFingerprint = songFingerprint(); }
+bool FourTrackerProcessor::hasUnsavedChanges() const { return songFingerprint() != savedFingerprint; }
+
+// ---------------------------------------------------------------------------
+// RE-SAMPLE
+// ---------------------------------------------------------------------------
+
+juce::String FourTrackerProcessor::resampleInto (int slot, const ResampleRequest& rq, bool& ok)
+{
+    ok = false;
+    if (slot <= 0 || slot >= kNumInstruments) return "CHOOSE AN INSTRUMENT SLOT FIRST";
+    const int used = juce::jlimit (1, kNumChannels, engine.numChannels.load());
+    juce::uint32 tracks = rq.tracks & ((used >= 32 ? 0xffffffffu : (1u << used) - 1u));
+    if (tracks == 0) return "NO TRACKS CHOSEN";
+
+    const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    auto r = std::make_unique<TrackerEngine>();
+    r->prepare (rate, 64);
+
+    // the song: every pattern (jumps may go elsewhere), the instruments, tempo and the mixer
+    const int pat = juce::jlimit (0, kMaxPatterns - 1, rq.pattern);
+    int rows = 0;
+    {
+        const juce::ScopedLock sl (engine.getDataLock());
+        for (int p = 0; p < kMaxPatterns; ++p)
+        {
+            auto& src = engine.getPattern (p);
+            auto& dst = r->getPattern (p);
+            dst.numRows = src.getNumRows();
+            std::copy (&src.cells[0][0], &src.cells[0][0] + kMaxRows * kNumChannels, &dst.cells[0][0]);
+        }
+        rows = engine.getPattern (pat).getNumRows();
+    }
+    const int from = juce::jlimit (0, rows - 1, rq.fromRow);
+    const int to = juce::jlimit (from, rows - 1, rq.toRow);
+    const int speed0 = juce::jlimit (1, 31, engine.speed.load()), bpm0 = juce::jlimit (32, 999, engine.bpm.load());
+    const double rowSeconds = 2.5 / bpm0 * speed0;
+
+    const bool looped = rq.ending == ResampleRequest::loopEnd;
+    const int len = to - from + 1;
+    // LOOP: the rows are played twice in a row and the second time is kept: it is exactly what you hear
+    // when the pattern loops (new notes cut the old ones, only what really rings on goes over the start).
+    // The rows are laid out twice (plus one row that marks the end); a very long part loops instead.
+    const bool twice = looped && 2 * len + 1 <= kMaxRows;
+    if (looped)
+    {
+        auto& p = r->getPattern (pat);
+        Cell sel[kMaxRows][kNumChannels];
+        for (int row = 0; row < len; ++row)
+            for (int c = 0; c < kNumChannels; ++c)
+            {
+                Cell cell = p.cells[from + row][c];
+                const bool jump = cell.fx == 0x0B || cell.fx == 0x0D || (cell.fx == 0x0E && (cell.param >> 4) == 0x6);
+                if (jump) { cell.fx = 0; cell.param = 0; }       // pattern jumps / breaks / loops would leave the part
+                sel[row][c] = cell;
+            }
+        for (int row = 0; row < kMaxRows; ++row)
+            for (int c = 0; c < kNumChannels; ++c)
+                p.cells[row][c] = row < (twice ? 2 * len + 1 : len) ? sel[row % len][c] : Cell();
+        p.numRows = twice ? 2 * len + 1 : len;
+    }
+    else
+    {
+        // the rows after the last one are emptied; RING OUT gets a few more empty rows to ring out in
+        auto& p = r->getPattern (pat);
+        for (int row = to + 1; row < kMaxRows; ++row)
+            for (int c = 0; c < kNumChannels; ++c) p.cells[row][c].clear();
+        // (at least one empty row: the end is where that row starts)
+        const int tailRows = rq.ending == ResampleRequest::ringOut ? (int) std::ceil (4.0 / rowSeconds) + 1 : 1;
+        p.numRows = juce::jmin (kMaxRows, to + 1 + tailRows);
+    }
+    for (int i = 1; i < kNumInstruments; ++i) r->publishInstrument (i, instruments[(size_t) i].makeSnapshot());
+    r->speed = speed0;
+    r->bpm = bpm0;
+    r->numChannels = used;
+    r->loopPattern = looped && ! twice;   // otherwise it stops at the end of the prepared pattern
+    r->followHostTempo = false;
+    r->rawOutput = true;
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        r->mix[c].volume = engine.mix[c].volume.load();
+        r->mix[c].pan = engine.mix[c].pan.load();
+        r->mix[c].pitch = engine.mix[c].pitch.load();
+        r->mix[c].solo = false;
+        r->mix[c].mute = (tracks & (1u << c)) == 0;
+    }
+    r->requestPattern (pat);
+    r->requestStart();
+
+    // play it one sample at a time, so the first and last rows are exact
+    const int maxFrames = (int) (rate * juce::jmin (900.0, (to + 1 + len) * rowSeconds * 4.0 + 6.0));
+    juce::AudioBuffer<float> out (2, juce::jmax (1, maxFrames));
+    out.clear();
+    juce::MidiBuffer noMidi;
+    float frame[2] = { 0.0f, 0.0f };
+    float* chans[2] = { &frame[0], &frame[1] };
+    juce::AudioBuffer<float> one (chans, 2, 1);
+    int startAt = -1, endAt = -1, n = 0, quiet = 0;
+    const int quietNeeded = (int) (rate * 0.05);
+    bool started = false;
+    int prevRow = 0, wraps = 0;
+    while (n < maxFrames)
+    {
+        frame[0] = frame[1] = 0.0f;
+        r->process (one, noMidi, -1.0);
+        r->midiOut.clear();
+        const bool playing = r->playing.load();
+        if (playing) started = true;
+        const int rowNow = r->playRow.load();
+        if (looped)
+        {
+            if (started && playing && rowNow < prevRow) ++wraps;
+            prevRow = rowNow;
+            // the second time round: rows len .. 2 len - 1 (or the second loop of a long part)
+            if (startAt < 0 && started && playing && (twice ? rowNow >= len : wraps >= 1)) startAt = n;
+            if (startAt >= 0 && endAt < 0 && (twice ? (rowNow >= 2 * len || ! playing) : wraps >= 2)) endAt = n;
+            out.setSample (0, n, frame[0]);
+            out.setSample (1, n, frame[1]);
+            ++n;
+            if (endAt >= 0) break;
+            if (started && ! playing && startAt < 0) break;
+            continue;
+        }
+        if (startAt < 0 && started && playing && rowNow >= from) startAt = n;     // this sample is the first of row `from`
+        out.setSample (0, n, frame[0]);
+        out.setSample (1, n, frame[1]);
+        ++n;
+        if (started && startAt >= 0 && endAt < 0 && (! playing || rowNow > to)) endAt = n - 1;   // the last row is over
+        if (endAt >= 0)
+        {
+            if (rq.ending == ResampleRequest::cutEnd) break;
+            quiet = (std::abs (frame[0]) < 1.0e-4f && std::abs (frame[1]) < 1.0e-4f) ? quiet + 1 : 0;
+            if (quiet >= quietNeeded || n - endAt > (int) (rate * 4.0)) break;
+        }
+        if (started && ! playing && startAt < 0) break;
+    }
+    if (startAt < 0) return "NOTHING WAS PLAYED";
+    if (endAt < 0) endAt = n;
+    const int last = rq.ending == ResampleRequest::ringOut ? juce::jmax (endAt, n - quiet) : endAt;
+    if (last - startAt <= 0) return "NOTHING WAS PLAYED";
+
+    const int length = looped ? endAt - startAt : last - startAt;
+    if (length <= 0) return "NOTHING WAS PLAYED";
+
+    float peak = 0.0f;
+    for (int c = 0; c < 2; ++c) peak = juce::jmax (peak, out.getMagnitude (c, startAt, length));
+    if (peak < 1.0e-4f) return "THOSE TRACKS ARE SILENT THERE";
+
+    auto data = juce::ReferenceCountedObjectPtr<SampleData> (new SampleData());
+    data->buffer.setSize (2, length);
+    for (int c = 0; c < 2; ++c) data->buffer.copyFrom (c, 0, out, c, startAt, length);
+    data->sampleRate = rate;
+    data->bitDepth = 16;
+    juce::String extra;
+    if (rq.normalise || peak > 0.99f)
+    {
+        data->buffer.applyGain (0.98f / peak);
+        extra = rq.normalise ? ", NORMALIZED" : ", TURNED DOWN SO IT DOESN'T CLIP";
+    }
+
+    auto& in = instruments[(size_t) slot];
+    in.clear();
+    in.data = data;
+    juce::String trackText;   // short, so it fits in the instrument list: "RS P02 ALL", "RS P02 1+3"
+    if (tracks == (((used >= 32 ? 0xffffffffu : (1u << used) - 1u))))
+        trackText = "ALL";
+    else
+        for (int c = 0; c < used; ++c)
+            if (tracks & (1u << c)) trackText << (trackText.isEmpty() ? "" : "+") << (c + 1);
+    in.name = "RS P" + formatNumber (pat, 2, hexMode) + " " + trackText;
+    in.resetPoints();
+    if (looped)
+    {
+        in.params.loop = true;
+        in.params.loopStart = 0;
+        in.params.loopEnd = length - 1;
+        extra << ", LOOP SET";
+    }
+    instrumentChanged (slot);
+    ok = true;
+    return "RE-SAMPLED PATTERN " + formatNumber (pat, 2, hexMode) + " ROWS " + formatNumber (from, 2, hexMode) + "-" + formatNumber (to, 2, hexMode)
+           + " INTO " + formatNumber (slot, 2, hexMode) + " (" + juce::String (length / rate, 2) + " S" + extra + ")";
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +609,68 @@ void FourTrackerProcessor::patternsFromTree (const juce::ValueTree& t)
     }
 }
 
+/** One instrument (settings and sample) as a tree; used by modules and pattern files. */
+static juce::ValueTree instrumentToTree (const Instrument& in, int slot)
+{
+    juce::ValueTree it (ids::inst);
+    const auto& p = in.params;
+    it.setProperty ("slot", slot, nullptr);
+    it.setProperty ("name", in.name, nullptr);
+    it.setProperty ("path", in.sourcePath, nullptr);
+    it.setProperty ("volume", p.volume, nullptr);
+    it.setProperty ("transpose", p.transpose, nullptr);
+    it.setProperty ("finetune", p.fineTune, nullptr);
+    it.setProperty ("loop", p.loop, nullptr);
+    it.setProperty ("pingpong", p.pingPong, nullptr);
+    it.setProperty ("loopBackward", p.loopBackward, nullptr);
+    it.setProperty ("reverse", p.reverse, nullptr);
+    it.setProperty ("start", p.start, nullptr);
+    it.setProperty ("end", p.end, nullptr);
+    it.setProperty ("loopStart", p.loopStart, nullptr);
+    it.setProperty ("loopEnd", p.loopEnd, nullptr);
+    if (p.midi)
+    {
+        it.setProperty ("midi", true, nullptr);
+        it.setProperty ("midiCh", p.midiChannel, nullptr);
+        it.setProperty ("midiProg", p.midiProgram, nullptr);
+    }
+    if (p.synth)
+    {
+        it.setProperty ("synth", true, nullptr);
+        it.setProperty ("wave", p.synthWave, nullptr);
+        it.setProperty ("attack", p.attack, nullptr);
+        it.setProperty ("decay", p.decay, nullptr);
+        it.setProperty ("sustain", p.sustain, nullptr);
+        it.setProperty ("release", p.release, nullptr);
+        it.setProperty ("cutoff", p.cutoff, nullptr);
+        it.setProperty ("resonance", p.resonance, nullptr);
+        it.setProperty ("distortion", p.distortion, nullptr);
+        it.setProperty ("accent", p.accent, nullptr);
+        juce::StringArray ccs;
+        for (auto c : p.cc) ccs.add (juce::String (c));
+        it.setProperty ("knobs", ccs.joinIntoString (","), nullptr);
+    }
+    if (p.synth2)
+    {
+        it.setProperty ("synth2", true, nullptr);
+        it.setProperty ("s2", ft::synth2::toString (p.s2), nullptr);
+        juce::StringArray ccs;
+        for (auto c : p.cc2) ccs.add (juce::String (c));
+        it.setProperty ("knobs2", ccs.joinIntoString (","), nullptr);
+    }
+    it.setProperty ("rate", in.data->sampleRate, nullptr);
+    it.setProperty ("bits", in.data->bitDepth, nullptr);
+    it.setProperty ("channels", in.data->getNumChannels(), nullptr);
+    it.setProperty ("length", in.data->getLength(), nullptr);
+    
+    const int len = in.data->getLength(), nch = in.data->getNumChannels();
+    juce::MemoryBlock mb ((size_t) len * (size_t) nch * sizeof (float));
+    for (int c = 0; c < nch; ++c)
+        mb.copyFrom (in.data->buffer.getReadPointer (c), (size_t) c * (size_t) len * sizeof (float), (size_t) len * sizeof (float));
+    it.setProperty ("pcm", mb, nullptr);
+    return it;
+}
+
 juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
 {
     juce::ValueTree t (ids::insts);
@@ -378,66 +678,68 @@ juce::ValueTree FourTrackerProcessor::instrumentsToTree() const
     {
         const auto& in = instruments[(size_t) i];
         if (in.isEmpty()) continue;
-
-        juce::ValueTree it (ids::inst);
-        const auto& p = in.params;
-        it.setProperty ("slot", i, nullptr);
-        it.setProperty ("name", in.name, nullptr);
-        it.setProperty ("path", in.sourcePath, nullptr);
-        it.setProperty ("volume", p.volume, nullptr);
-        it.setProperty ("transpose", p.transpose, nullptr);
-        it.setProperty ("finetune", p.fineTune, nullptr);
-        it.setProperty ("loop", p.loop, nullptr);
-        it.setProperty ("pingpong", p.pingPong, nullptr);
-        it.setProperty ("loopBackward", p.loopBackward, nullptr);
-        it.setProperty ("reverse", p.reverse, nullptr);
-        it.setProperty ("start", p.start, nullptr);
-        it.setProperty ("end", p.end, nullptr);
-        it.setProperty ("loopStart", p.loopStart, nullptr);
-        it.setProperty ("loopEnd", p.loopEnd, nullptr);
-        if (p.midi)
-        {
-            it.setProperty ("midi", true, nullptr);
-            it.setProperty ("midiCh", p.midiChannel, nullptr);
-            it.setProperty ("midiProg", p.midiProgram, nullptr);
-        }
-        if (p.synth)
-        {
-            it.setProperty ("synth", true, nullptr);
-            it.setProperty ("wave", p.synthWave, nullptr);
-            it.setProperty ("attack", p.attack, nullptr);
-            it.setProperty ("decay", p.decay, nullptr);
-            it.setProperty ("sustain", p.sustain, nullptr);
-            it.setProperty ("release", p.release, nullptr);
-            it.setProperty ("cutoff", p.cutoff, nullptr);
-            it.setProperty ("resonance", p.resonance, nullptr);
-            it.setProperty ("distortion", p.distortion, nullptr);
-            it.setProperty ("accent", p.accent, nullptr);
-            juce::StringArray ccs;
-            for (auto c : p.cc) ccs.add (juce::String (c));
-            it.setProperty ("knobs", ccs.joinIntoString (","), nullptr);
-        }
-        if (p.synth2)
-        {
-            it.setProperty ("synth2", true, nullptr);
-            it.setProperty ("s2", ft::synth2::toString (p.s2), nullptr);
-            juce::StringArray ccs;
-            for (auto c : p.cc2) ccs.add (juce::String (c));
-            it.setProperty ("knobs2", ccs.joinIntoString (","), nullptr);
-        }
-        it.setProperty ("rate", in.data->sampleRate, nullptr);
-        it.setProperty ("bits", in.data->bitDepth, nullptr);
-        it.setProperty ("channels", in.data->getNumChannels(), nullptr);
-        it.setProperty ("length", in.data->getLength(), nullptr);
-
-        const int len = in.data->getLength(), nch = in.data->getNumChannels();
-        juce::MemoryBlock mb ((size_t) len * (size_t) nch * sizeof (float));
-        for (int c = 0; c < nch; ++c)
-            mb.copyFrom (in.data->buffer.getReadPointer (c), (size_t) c * (size_t) len * sizeof (float), (size_t) len * sizeof (float));
-        it.setProperty ("pcm", mb, nullptr);
-        t.appendChild (it, nullptr);
+        t.appendChild (instrumentToTree (in, i), nullptr);
     }
     return t;
+}
+
+/** Reads one instrument written by instrumentToTree. False if it has no usable sample. */
+static bool instrumentFromTree (const juce::ValueTree& it, Instrument& in)
+{
+    const int len = it.getProperty ("length", 0), nch = juce::jlimit (1, 2, (int) it.getProperty ("channels", 1));
+    auto* mb = it.getProperty ("pcm").getBinaryData();
+    if (mb == nullptr || len <= 0 || mb->getSize() < (size_t) len * (size_t) nch * sizeof (float)) return false;
+    
+    SampleData::Ptr d = new SampleData();
+    d->sampleRate = it.getProperty ("rate", 44100.0);
+    d->bitDepth = it.getProperty ("bits", 16);
+    d->buffer.setSize (nch, len);
+    for (int c = 0; c < nch; ++c)
+        memcpy (d->buffer.getWritePointer (c), static_cast<const char*> (mb->getData()) + (size_t) c * (size_t) len * sizeof (float), (size_t) len * sizeof (float));
+    
+    in.data = d;
+    in.name = it.getProperty ("name").toString();
+    in.sourcePath = it.getProperty ("path").toString();
+    auto& p = in.params;
+    p.volume = it.getProperty ("volume", 64);
+    p.transpose = it.getProperty ("transpose", 0);
+    p.fineTune = it.getProperty ("finetune", 0);
+    p.loop = it.getProperty ("loop", false);
+    p.pingPong = it.getProperty ("pingpong", false);
+    p.loopBackward = it.getProperty ("loopBackward", false);
+    p.reverse = it.getProperty ("reverse", false);
+    p.start = it.getProperty ("start", 0);
+    p.end = it.getProperty ("end", len - 1);
+    p.loopStart = it.getProperty ("loopStart", 0);
+    p.loopEnd = it.getProperty ("loopEnd", len - 1);
+    p.synth = it.getProperty ("synth", false);
+    p.synthWave = it.getProperty ("wave", 0);
+    p.attack = it.getProperty ("attack", 2);
+    p.decay = it.getProperty ("decay", 250);
+    p.sustain = it.getProperty ("sustain", 40);
+    p.release = it.getProperty ("release", 200);
+    p.cutoff = it.getProperty ("cutoff", 127);
+    p.resonance = it.getProperty ("resonance", 0);
+    p.distortion = it.getProperty ("distortion", 0);
+    p.accent = it.getProperty ("accent", 0);
+    {
+        juce::StringArray ccs;
+        ccs.addTokens (it.getProperty ("knobs", "").toString(), ",", "");
+        for (int k = 0; k < (int) p.cc.size(); ++k) p.cc[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
+    }
+    p.synth2 = it.getProperty ("synth2", false);
+    if (p.synth2)
+    {
+        p.s2 = ft::synth2::fromString (it.getProperty ("s2", "").toString());
+        juce::StringArray ccs;
+        ccs.addTokens (it.getProperty ("knobs2", "").toString(), ",", "");
+        for (int k = 0; k < (int) p.cc2.size(); ++k) p.cc2[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
+    }
+    p.midi = it.getProperty ("midi", false);
+    p.midiChannel = it.getProperty ("midiCh", 1);
+    p.midiProgram = it.getProperty ("midiProg", 0);
+    in.sanitise();
+    return true;
 }
 
 void FourTrackerProcessor::instrumentsFromTree (const juce::ValueTree& t)
@@ -449,61 +751,8 @@ void FourTrackerProcessor::instrumentsFromTree (const juce::ValueTree& t)
         if (! it.hasType (ids::inst)) continue;
         const int slot = it.getProperty ("slot", 0);
         if (slot <= 0 || slot >= kNumInstruments) continue;
-
-        const int len = it.getProperty ("length", 0), nch = juce::jlimit (1, 2, (int) it.getProperty ("channels", 1));
-        auto* mb = it.getProperty ("pcm").getBinaryData();
-        if (mb == nullptr || len <= 0 || mb->getSize() < (size_t) len * (size_t) nch * sizeof (float)) continue;
-
-        SampleData::Ptr d = new SampleData();
-        d->sampleRate = it.getProperty ("rate", 44100.0);
-        d->bitDepth = it.getProperty ("bits", 16);
-        d->buffer.setSize (nch, len);
-        for (int c = 0; c < nch; ++c)
-            memcpy (d->buffer.getWritePointer (c), static_cast<const char*> (mb->getData()) + (size_t) c * (size_t) len * sizeof (float), (size_t) len * sizeof (float));
-
-        auto& in = instruments[(size_t) slot];
-        in.data = d;
-        in.name = it.getProperty ("name").toString();
-        in.sourcePath = it.getProperty ("path").toString();
-        auto& p = in.params;
-        p.volume = it.getProperty ("volume", 64);
-        p.transpose = it.getProperty ("transpose", 0);
-        p.fineTune = it.getProperty ("finetune", 0);
-        p.loop = it.getProperty ("loop", false);
-        p.pingPong = it.getProperty ("pingpong", false);
-        p.loopBackward = it.getProperty ("loopBackward", false);
-        p.reverse = it.getProperty ("reverse", false);
-        p.start = it.getProperty ("start", 0);
-        p.end = it.getProperty ("end", len - 1);
-        p.loopStart = it.getProperty ("loopStart", 0);
-        p.loopEnd = it.getProperty ("loopEnd", len - 1);
-        p.synth = it.getProperty ("synth", false);
-        p.synthWave = it.getProperty ("wave", 0);
-        p.attack = it.getProperty ("attack", 2);
-        p.decay = it.getProperty ("decay", 250);
-        p.sustain = it.getProperty ("sustain", 40);
-        p.release = it.getProperty ("release", 200);
-        p.cutoff = it.getProperty ("cutoff", 127);
-        p.resonance = it.getProperty ("resonance", 0);
-        p.distortion = it.getProperty ("distortion", 0);
-        p.accent = it.getProperty ("accent", 0);
-        {
-            juce::StringArray ccs;
-            ccs.addTokens (it.getProperty ("knobs", "").toString(), ",", "");
-            for (int k = 0; k < (int) p.cc.size(); ++k) p.cc[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
-        }
-        p.synth2 = it.getProperty ("synth2", false);
-        if (p.synth2)
-        {
-            p.s2 = ft::synth2::fromString (it.getProperty ("s2", "").toString());
-            juce::StringArray ccs;
-            ccs.addTokens (it.getProperty ("knobs2", "").toString(), ",", "");
-            for (int k = 0; k < (int) p.cc2.size(); ++k) p.cc2[(size_t) k] = k < ccs.size() ? ccs[k].getIntValue() : -1;
-        }
-        p.midi = it.getProperty ("midi", false);
-        p.midiChannel = it.getProperty ("midiCh", 1);
-        p.midiProgram = it.getProperty ("midiProg", 0);
-        in.sanitise();
+        Instrument in;
+        if (instrumentFromTree (it, in)) instruments[(size_t) slot] = in;
     }
 
     for (int i = 1; i < kNumInstruments; ++i)
@@ -609,6 +858,7 @@ void FourTrackerProcessor::setStateInformation (const void* data, int sizeInByte
 
     if (restoreSong)
         readSong (root);
+    markSaved();
     sendChangeMessage();
 }
 
@@ -645,7 +895,7 @@ void FourTrackerProcessor::setNumChannels (int n)
    #if FOURTRACKER_FX_HOST
     if (fx != nullptr)       // a removed track takes its effects with it
         for (int c = n; c < kNumChannels; ++c)
-            for (int i = 0; i < 2; ++i)
+            for (int i = 0; i < FxHost::kSlotsPerChannel; ++i)
                 if (fx->hasPlugin (c, i)) fx->clearSlot (c, i);
     if (fx != nullptr)       // ...and its chaining, both from it and into it
         for (int c = 0; c < kNumChannels; ++c)
@@ -687,6 +937,8 @@ void FourTrackerProcessor::newPatternSet()
     engine.requestPattern (0);
     selectedInstrument = 1;
     sendChangeMessage();
+    currentModuleFile = juce::File();
+    markSaved();
 }
 
 void FourTrackerProcessor::loadDemoSong()
@@ -699,6 +951,8 @@ void FourTrackerProcessor::loadDemoSong()
     createDemoInstruments (instruments);
     for (int i = 1; i < kNumInstruments; ++i)
         engine.publishInstrument (i, instruments[(size_t) i].makeSnapshot());
+    currentModuleFile = juce::File();
+    markSaved();
     sendChangeMessage();
 }
 
@@ -744,6 +998,7 @@ void FourTrackerProcessor::ensureDemoFolder()
 }
 
 static const char kModuleMagic[4]     = { 'F', 'T', 'M', 'D' };
+static const char kPatternFileMagic[4] = { 'F', 'T', 'P', 'T' };
 static const char kPatternSetMagic[4] = { 'F', 'T', 'P', 'S' };
 
 bool FourTrackerProcessor::saveModule (const juce::File& file)
@@ -770,7 +1025,10 @@ bool FourTrackerProcessor::saveModule (const juce::File& file)
         fos.flush();
         if (fos.getStatus().failed()) return false;
     }
-    return tmp.moveFileTo (file);   // replaces the old file only once the new one is complete
+    if (! tmp.moveFileTo (file)) return false;   // replaces the old file only once the new one is complete
+    currentModuleFile = file;
+    markSaved();
+    return true;
 }
 
 juce::String FourTrackerProcessor::loadModule (const juce::File& file)
@@ -791,6 +1049,8 @@ juce::String FourTrackerProcessor::loadModule (const juce::File& file)
         if (! t.hasType (ids::module))
             return file.getFileName() + " is damaged";
         readSong (t);
+        currentModuleFile = file;
+        markSaved();
         sendChangeMessage();
         return {};
     }
@@ -809,6 +1069,170 @@ juce::String FourTrackerProcessor::loadModule (const juce::File& file)
     }
 
     return file.getFileName() + " is not a Four Tracker module";
+}
+
+// ---------------------------------------------------------------------------
+// single patterns (.ftpat): the rows plus the instruments they use, to share and to reuse
+// ---------------------------------------------------------------------------
+
+int FourTrackerProcessor::patternTracksUsed (int pattern)
+{
+    const auto& pat = engine.getPattern (pattern);
+    int last = -1;
+    for (int r = 0; r < pat.getNumRows(); ++r)
+        for (int c = 0; c < kNumChannels; ++c)
+            if (! pat.at (r, c).isEmpty()) last = juce::jmax (last, c);
+    return last + 1;
+}
+
+juce::String FourTrackerProcessor::savePattern (int pattern, const juce::File& file)
+{
+    pattern = juce::jlimit (0, kMaxPatterns - 1, pattern);
+    juce::ValueTree t (ids::patternFile);
+    std::array<bool, kNumInstruments> used {};
+    {
+        const juce::ScopedLock sl (engine.getDataLock());
+        const auto& pat = engine.getPattern (pattern);
+        if (pat.isEmpty()) return "PATTERN " + formatNumber (pattern, 2, hexMode) + " IS EMPTY";
+        const int rows = pat.getNumRows();
+        const int chans = juce::jmax (1, patternTracksUsed (pattern));
+        juce::MemoryBlock mb ((size_t) (rows * chans * 4));
+        auto* d = static_cast<uint8_t*> (mb.getData());
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < chans; ++c)
+            {
+                const auto& cell = pat.at (r, c);
+                *d++ = cell.note; *d++ = cell.inst; *d++ = cell.fx; *d++ = cell.param;
+                if (cell.inst > 0 && cell.inst < kNumInstruments) used[cell.inst] = true;
+            }
+        t.setProperty ("version", 1, nullptr);
+        t.setProperty ("name", file.getFileNameWithoutExtension(), nullptr);
+        t.setProperty ("rows", rows, nullptr);
+        t.setProperty ("chans", chans, nullptr);
+        t.setProperty ("data", mb, nullptr);
+        t.setProperty ("speed", engine.speed.load(), nullptr);   // for information only: loading keeps the song's tempo
+        t.setProperty ("bpm", engine.bpm.load(), nullptr);
+    }
+    juce::ValueTree insts (ids::insts);
+    int numInsts = 0;
+    for (int i = 1; i < kNumInstruments; ++i)
+        if (used[(size_t) i] && ! instruments[(size_t) i].isEmpty()) { insts.appendChild (instrumentToTree (instruments[(size_t) i], i), nullptr); ++numInsts; }
+    t.appendChild (insts, nullptr);
+
+    juce::MemoryOutputStream raw;
+    t.writeToStream (raw);
+    const auto tmp = file.getSiblingFile (file.getFileName() + ".tmp");
+    tmp.deleteFile();
+    {
+        juce::FileOutputStream fos (tmp);
+        if (! fos.openedOk()) return "COULD NOT SAVE " + file.getFileName().toUpperCase();
+        fos.write (kPatternFileMagic, 4);
+        {
+            juce::GZIPCompressorOutputStream gz (fos, 6);
+            gz.write (raw.getData(), raw.getDataSize());
+            gz.flush();
+        }
+        fos.flush();
+        if (fos.getStatus().failed()) return "COULD NOT SAVE " + file.getFileName().toUpperCase();
+    }
+    if (! tmp.moveFileTo (file)) return "COULD NOT SAVE " + file.getFileName().toUpperCase();
+    return {};
+}
+
+int FourTrackerProcessor::findEmptyPattern (int from)
+{
+    for (int k = 0; k < kMaxPatterns; ++k)
+    {
+        const int p = (from + k) % kMaxPatterns;
+        if (engine.getPattern (p).isEmpty()) return p;
+    }
+    return -1;
+}
+
+juce::String FourTrackerProcessor::loadPattern (const juce::File& file, int target, bool& ok)
+{
+    ok = false;
+    juce::MemoryBlock mb;
+    if (! file.loadFileAsData (mb) || mb.getSize() < 4) return "CAN'T READ " + file.getFileName().toUpperCase();
+    const auto* bytes = static_cast<const char*> (mb.getData());
+    if (memcmp (bytes, kPatternFileMagic, 4) != 0) return file.getFileName().toUpperCase() + " IS NOT A FOUR TRACKER PATTERN";
+    juce::MemoryInputStream mis (bytes + 4, mb.getSize() - 4, false);
+    juce::GZIPDecompressorInputStream gz (mis);
+    juce::MemoryBlock unpacked;
+    gz.readIntoMemoryBlock (unpacked);
+    const auto t = juce::ValueTree::readFromData (unpacked.getData(), unpacked.getSize());
+    if (! t.hasType (ids::patternFile)) return file.getFileName().toUpperCase() + " IS DAMAGED";
+
+    if (target < 0 || target >= kMaxPatterns) return "NO EMPTY PATTERN LEFT";
+    if (! engine.getPattern (target).isEmpty()) return "PATTERN " + formatNumber (target, 2, hexMode) + " IS NOT EMPTY";
+
+    // its instruments: the same sound already loaded is used again, the rest go into empty slots
+    std::array<int, kNumInstruments> map {};
+    std::array<bool, kNumInstruments> taken {};
+    std::vector<std::pair<int, Instrument>> toAdd;
+    int reused = 0;
+    for (auto it : t.getChildWithName (ids::insts))
+    {
+        const int orig = it.getProperty ("slot", 0);
+        if (orig <= 0 || orig >= kNumInstruments) continue;
+        Instrument in;
+        if (! instrumentFromTree (it, in)) continue;
+        int found = -1;
+        for (int i = 1; i < kNumInstruments && found < 0; ++i)
+        {
+            const auto& have = instruments[(size_t) i];
+            if (have.isEmpty() || have.name != in.name || have.data->getLength() != in.data->getLength()
+                || have.data->getNumChannels() != in.data->getNumChannels() || have.params.synth2 != in.params.synth2) continue;
+            bool same = true;
+            for (int c = 0; c < in.data->getNumChannels() && same; ++c)
+                same = memcmp (have.data->buffer.getReadPointer (c), in.data->buffer.getReadPointer (c), sizeof (float) * (size_t) in.data->getLength()) == 0;
+            if (same) found = i;
+        }
+        if (found > 0) { map[(size_t) orig] = found; ++reused; continue; }
+        int free = -1;
+        for (int i = 1; i < kNumInstruments && free < 0; ++i)
+            if (instruments[(size_t) i].isEmpty() && ! taken[(size_t) i]) free = i;
+        if (free < 0)
+            return "NOT ENOUGH EMPTY INSTRUMENT SLOTS: THE PATTERN NEEDS " + juce::String (t.getChildWithName (ids::insts).getNumChildren() - reused) + " MORE";
+        taken[(size_t) free] = true;
+        map[(size_t) orig] = free;
+        toAdd.push_back ({ free, in });
+    }
+
+    const int rows = juce::jlimit (1, kMaxRows, (int) t.getProperty ("rows", kDefaultRows));
+    const int chans = juce::jlimit (1, kNumChannels, (int) t.getProperty ("chans", 4));
+    auto* data = t.getProperty ("data").getBinaryData();
+    if (data == nullptr) return file.getFileName().toUpperCase() + " IS DAMAGED";
+
+    for (auto& [slot, in] : toAdd) { instruments[(size_t) slot] = in; instruments[(size_t) slot].sanitise(); }
+    for (auto& [slot, in] : toAdd) engine.publishInstrument (slot, instruments[(size_t) slot].makeSnapshot());
+
+    int tempoRemoved = 0;
+    {
+        const juce::ScopedLock sl (engine.getDataLock());
+        auto& pat = engine.getPattern (target);
+        pat.clear();
+        pat.numRows = rows;
+        const auto* d = static_cast<const uint8_t*> (data->getData());
+        const int cells = juce::jmin (rows * chans, (int) data->getSize() / 4);
+        for (int i = 0; i < cells; ++i, d += 4)
+        {
+            auto& cell = pat.at (i / chans, i % chans);
+            cell.note = d[0] <= kNoteOff ? d[0] : 0;
+            cell.inst = d[1] < kNumInstruments ? (uint8_t) map[d[1]] : 0;
+            cell.fx = d[2];
+            cell.param = d[3];
+            if (cell.fx == 0x0F) { cell.fx = 0; cell.param = 0; ++tempoRemoved; }   // Fxx: the song keeps its own SPEED and BPM
+        }
+        if (chans > engine.numChannels.load()) engine.numChannels = normaliseChannels (chans);
+    }
+    sendChangeMessage();
+    ok = true;
+    juce::String msg = "LOADED " + file.getFileNameWithoutExtension().toUpperCase() + " INTO PATTERN " + formatNumber (target, 2, hexMode);
+    if (! toAdd.empty()) msg << ", " << (int) toAdd.size() << " INSTRUMENT" << (toAdd.size() == 1 ? "" : "S") << " ADDED";
+    if (reused > 0) msg << ", " << reused << " ALREADY HERE";
+    if (tempoRemoved > 0) msg << ", TEMPO COMMANDS REMOVED";
+    return msg;
 }
 
 // ===========================================================================

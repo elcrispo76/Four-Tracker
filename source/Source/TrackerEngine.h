@@ -97,6 +97,9 @@ public:
     std::atomic<bool> respondToMidiStartStop { true };   // MIDI clock Start/Stop messages
     std::atomic<int>  masterVolume   { 80 };     // 0..100
     std::atomic<int>  numChannels    { 4 };      // channels in use: 4, 8 or 16
+    /** RE-SAMPLE: the mix comes out as it is (no MASTER volume, no FADE, no limiter), so a
+        rendered sample played back on one track at full volume sounds like the tracks did. */
+    std::atomic<bool> rawOutput      { false };
 
     ChannelMix mix[kNumChannels];
     /** Silent because of MUTE, or because another channel is on SOLO (and this one isn't). */

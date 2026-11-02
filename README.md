@@ -44,7 +44,7 @@
 
 Five effects for Four Tracker and any DAW, in the same look. They are downloaded together: the **Effects Bundle** installs all of them in one go
 (tick the ones you want, 64-bit and/or 32-bit): `FourTrackerEffects-Bundle-1.0.0.exe` under
-[Releases](https://github.com/elcrispo76/Four-Tracker/releases) (tag `effects-bundle-1.0.0`). Its installer script
+[Releases](https://github.com/elcrispo76/Four-Tracker/releases) (tag `effect-bundle-1.0.0`). Its installer script
 is in [`effects-bundle/`](effects-bundle/): run each effect's `build-windows.bat` first, then `effects-bundle\build-bundle.bat`.
 
 | Effect | What it is | Source |

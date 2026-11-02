@@ -23,6 +23,7 @@ third-party recordings and is released under CC0 1.0 (public domain).
 | [JUCE](https://juce.com) 8 | Windows, audio and MIDI devices, plugin formats, file formats | JUCE licence (Starter) or AGPLv3 |
 | Steinberg VST3 SDK (bundled with JUCE) | VST3 plugin | MIT |
 | Steinberg ASIO SDK (in `source/SDKs/asiosdk`) | ASIO driver support in the released builds | GPLv3 (Steinberg's open-source ASIO licence, October 2025) |
+| [LAME](https://lame.sourceforge.io) 3.100 encoder (in `source/ThirdParty/lame`) | REC: saving a jam as MP3 | LGPL 2 (see `source/ThirdParty/lame/COPYING`) |
 | Steinberg VST2 SDK (optional, not in this repository) | VST2 plugin, personal builds only | Not redistributable |
 
 VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a trademark and software of

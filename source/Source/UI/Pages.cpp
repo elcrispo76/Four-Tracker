@@ -285,7 +285,40 @@ void ChannelStripsPanel::refresh()
 
 SongPanel::SongPanel (EditorState& s) : st (s)
 {
-    for (auto* b : { &start, &stop, &newSet, &load, &save }) { addAndMakeVisible (b); b->iconWidth = 30.0f; }
+    for (auto* b : { &start, &stop, &newSet, &load, &save, &loadPat, &savePat }) { addAndMakeVisible (b); b->iconWidth = 22.0f; }
+    loadPat.subLabel = "PATTERN"; loadPat.icon = Theme::iconFolder;
+    savePat.subLabel = "PATTERN"; savePat.icon = Theme::iconSave;
+    loadPat.setTooltip ("Load a single pattern (.ftpat) into an empty pattern, with its instruments. The song keeps its tempo.");
+    savePat.setTooltip ("Save the pattern in view (.ftpat) with the instruments it uses, to share or to use in another song.");
+    savePat.onClick = [this]
+    {
+        const int p = st.viewPattern();
+        if (st.engine().getPattern (p).isEmpty()) { st.setStatus ("PATTERN " + formatNumber (p, 2, st.hex()) + " IS EMPTY"); st.changed(); return; }
+        auto dir = patternFolder();
+        dir.createDirectory();
+        chooser = std::make_unique<FileChooser> ("Save pattern " + formatNumber (p, 2, st.hex()) + " (with its instruments)",
+                                                 dir.getChildFile ("pattern " + formatNumber (p, 2, st.hex()) + ".ftpat"), "*.ftpat");
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                savePatternFile (f);
+            });
+    };
+    loadPat.onClick = [this]
+    {
+        auto dir = patternFolder();
+        dir.createDirectory();
+        chooser = std::make_unique<FileChooser> ("Load a pattern into an empty pattern", dir, "*.ftpat");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                loadPatternFile (f);
+            });
+    };
     newSet.subLabel = "MODULE";
     newSet.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
     {
@@ -376,6 +409,34 @@ SongPanel::SongPanel (EditorState& s) : st (s)
     };
 }
 
+File SongPanel::patternFolder()
+{
+    return FourTrackerProcessor::getUserFolder().getChildFile ("Patterns");
+}
+
+void SongPanel::savePatternFile (const File& file)
+{
+    auto f = file.hasFileExtension ("ftpat") ? file : file.withFileExtension ("ftpat");
+    const int p = st.viewPattern();
+    const auto err = st.proc.savePattern (p, f);
+    st.setStatus (err.isEmpty() ? "SAVED PATTERN " + formatNumber (p, 2, st.hex()) + " AS " + f.getFileName().toUpperCase() : err);
+    st.changed();
+}
+
+void SongPanel::loadPatternFile (const File& f)
+{
+    const int view = st.viewPattern();
+    const int target = st.engine().getPattern (view).isEmpty() ? view : st.proc.findEmptyPattern ((view + 1) % kMaxPatterns);
+    if (target < 0) { st.setStatus ("NO EMPTY PATTERN LEFT - CLEAR ONE FIRST"); st.changed(); return; }
+    st.pushUndo (target);
+    bool ok = false;
+    const auto msg = st.proc.loadPattern (f, target, ok);
+    if (! ok) st.undoStack.pop_back();
+    else if (! st.engine().playing.load() && target != view) st.engine().requestPattern (target);   // show it (while playing it waits)
+    st.setStatus (msg);
+    st.changed();
+}
+
 void SongPanel::clearEverything (bool loadDemo)
 {
     if (loadDemo) st.proc.loadDemoSong();
@@ -410,9 +471,9 @@ void SongPanel::paint (Graphics& g)
 
 void SongPanel::resized()
 {
-    const int x0 = 268, w = 194, gap = 8;
-    PixelButton* bs[] = { &start, &stop, &newSet, &load, &save };
-    for (int i = 0; i < 5; ++i)
+    const int x0 = 266, w = 138, gap = 6;
+    PixelButton* bs[] = { &start, &stop, &newSet, &load, &save, &loadPat, &savePat };
+    for (int i = 0; i < 7; ++i)
         bs[i]->setBounds (x0 + i * (w + gap), 12, w, 148);
     length.setBounds (1310, 66, 170, 64);
 }
@@ -1178,16 +1239,246 @@ void InstrumentsPage::resized()
 }
 
 // ===========================================================================
+// ResampleDialog (RE-SAMPLE on the Sample Edit page)
+// ===========================================================================
+
+ResampleDialog::ResampleDialog (EditorState& s) : st (s)
+{
+    for (auto* c : std::initializer_list<Component*> { &patternBox, &fromBox, &toBox, &range, &trackMode, &blockBtn, &loopBtn, &cutBtn, &ringBtn, &normBtn, &goBtn, &cancelBtn })
+        addAndMakeVisible (c);
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        auto b = std::make_unique<PixelButton> (String (c + 1), PixelButton::Style::Segment, 18.0f);
+        b->setClickingTogglesState (true);
+        b->onClick = [this] { repaint(); };
+        addAndMakeVisible (*b);
+        trackButtons[(size_t) c] = std::move (b);
+    }
+    for (auto* b : { &loopBtn, &cutBtn, &ringBtn, &normBtn }) b->setClickingTogglesState (true);
+    for (auto* b : { &loopBtn, &cutBtn, &ringBtn }) { b->setRadioGroupId (7301); b->onClick = [this] { repaint(); }; }
+    loopBtn.setToggleState (true, dontSendNotification);
+
+    auto fmt = [this] (int v) { return formatNumber (v, 2, st.hex()); };
+    auto parse = [this] (const String& t, bool& ok)
+    {
+        const auto txt = t.trim();
+        ok = txt.isNotEmpty() && txt.containsOnly (st.hex() ? "0123456789abcdefABCDEF" : "0123456789");
+        return st.hex() ? txt.getHexValue32() : txt.getIntValue();
+    };
+    for (auto* v : { &patternBox, &fromBox, &toBox })
+    {
+        v->formatter = fmt;
+        v->parser = parse;
+        v->setShowSpinner (true);
+        v->setDragSensitivity (8.0f);
+        v->setJustification (Justification::centred);
+    }
+    patternBox.onChange = [this] (int) { patternChanged(); };
+    fromBox.onChange = [this] (int v) { if (toBox.getValue() < v) toBox.setValue (v); };
+    toBox.onChange = [this] (int v) { if (fromBox.getValue() > v) fromBox.setValue (v); };
+    range.onChange = [this] (bool) { patternChanged(); };
+    trackMode.onChange = [this] (bool) { updateEnabled(); };
+    blockBtn.onClick = [this] { useBlock(); };
+    goBtn.onClick = [this] { render(); };
+    cancelBtn.onClick = [this] { close(); };
+    setVisible (false);
+}
+
+void ResampleDialog::open()
+{
+    slot = st.proc.selectedInstrument;
+    patternBox.setValue (st.viewPattern());
+    range.setState (true);
+    trackMode.setState (true);
+    for (int c = 0; c < kNumChannels; ++c) trackButtons[(size_t) c]->setToggleState (false, dontSendNotification);   // tick the ones you want
+    patternChanged();
+    setVisible (true);
+    toFront (false);
+    repaint();
+}
+
+void ResampleDialog::close()
+{
+    setVisible (false);
+    st.changed();
+}
+
+void ResampleDialog::patternChanged()
+{
+    const int rows = st.engine().getPattern (patternBox.getValue()).getNumRows();
+    fromBox.setRange (0, rows - 1);
+    toBox.setRange (0, rows - 1);
+    if (range.getState()) { fromBox.setValue (0); toBox.setValue (rows - 1); }
+    updateEnabled();
+}
+
+void ResampleDialog::updateEnabled()
+{
+    const bool rows = ! range.getState();
+    for (auto* v : { &fromBox, &toBox }) { v->setEnabled (rows); v->setAlpha (rows ? 1.0f : 0.4f); }
+    const bool choose = ! trackMode.getState();
+    const int used = st.numChannels();
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        auto& b = *trackButtons[(size_t) c];
+        b.setEnabled (choose && c < used);
+        b.setAlpha (c >= used ? 0.25f : (choose ? 1.0f : 0.5f));
+    }
+    blockBtn.setEnabled (st.hasSelection);
+    blockBtn.setAlpha (st.hasSelection ? 1.0f : 0.4f);
+    goBtn.setButtonText (st.proc.getInstrument (slot).isEmpty() ? "RE-SAMPLE" : "RE-SAMPLE (REPLACE)");
+    repaint();
+}
+
+void ResampleDialog::useBlock()
+{
+    if (! st.hasSelection) return;
+    patternBox.setValue (st.viewPattern());
+    range.setState (false);
+    patternChanged();
+    fromBox.setValue (jmin (st.selRow0, st.selRow1));
+    toBox.setValue (jmax (st.selRow0, st.selRow1));
+    trackMode.setState (false);
+    for (int c = 0; c < kNumChannels; ++c)
+        trackButtons[(size_t) c]->setToggleState (c >= jmin (st.selCh0, st.selCh1) && c <= jmax (st.selCh0, st.selCh1), dontSendNotification);
+    updateEnabled();
+}
+
+juce::uint32 ResampleDialog::chosenTracks() const
+{
+    if (trackMode.getState()) return 0xffffu;
+    juce::uint32 m = 0;
+    for (int c = 0; c < kNumChannels; ++c)
+        if (trackButtons[(size_t) c]->getToggleState()) m |= 1u << c;
+    return m;
+}
+
+FourTrackerProcessor::ResampleRequest ResampleDialog::request() const
+{
+    FourTrackerProcessor::ResampleRequest r;
+    r.pattern = patternBox.getValue();
+    r.fromRow = fromBox.getValue();
+    r.toRow = toBox.getValue();
+    r.tracks = chosenTracks();
+    r.ending = cutBtn.getToggleState() ? FourTrackerProcessor::ResampleRequest::cutEnd
+             : ringBtn.getToggleState() ? FourTrackerProcessor::ResampleRequest::ringOut
+                                        : FourTrackerProcessor::ResampleRequest::loopEnd;
+    r.normalise = normBtn.getToggleState();
+    return r;
+}
+
+void ResampleDialog::render()
+{
+    bool ok = false;
+    const auto msg = st.proc.resampleInto (slot, request(), ok);
+    st.setStatus (msg);
+    if (ok)
+    {
+        setVisible (false);
+        if (onDone) onDone();
+    }
+    st.changed();
+    repaint();
+}
+
+bool ResampleDialog::handleKey (const KeyPress& k)
+{
+    if (! isVisible()) return false;
+    if (k.getKeyCode() == KeyPress::escapeKey) { close(); return true; }
+    if (k.getKeyCode() == KeyPress::returnKey) { render(); return true; }
+    return true;   // the note keys etc. stay out while the dialog is open
+}
+
+void ResampleDialog::paint (Graphics& g)
+{
+    g.fillAll (Colours::black.withAlpha (0.45f));
+    Theme::drawPanel (g, panel.toFloat());
+    auto p = panel.toFloat();
+    Theme::text (g, "RE-SAMPLE INTO " + formatNumber (slot, 2, st.hex()), { p.getX() + 20.0f, p.getY() + 14.0f, 700.0f, 34.0f }, 30.0f,
+                 Theme::ink, Justification::centredLeft, true);
+    Theme::text (g, "PLAYS THE ROWS AND TRACKS YOU CHOOSE AND MAKES A SAMPLE OF THEM",
+                 { p.getX() + 22.0f, p.getY() + 56.0f, p.getWidth() - 40.0f, 20.0f }, 15.0f, Theme::ink.withAlpha (0.7f));
+
+    auto label = [&] (const String& t, Component& c, float w)
+    {
+        Theme::text (g, t, { (float) c.getX() - w, (float) c.getY(), w - 10.0f, (float) c.getHeight() }, 18.0f, Theme::ink, Justification::centredRight);
+    };
+    label ("PATTERN", patternBox, 120.0f);
+    label ("FROM ROW", fromBox, 130.0f);
+    label ("TO ROW", toBox, 96.0f);
+    Theme::text (g, "TRACKS", { p.getX() + 20.0f, (float) trackMode.getY(), 110.0f, (float) trackMode.getHeight() }, 18.0f, Theme::ink, Justification::centredLeft);
+    Theme::text (g, "ENDING", { p.getX() + 20.0f, (float) loopBtn.getY(), 110.0f, (float) loopBtn.getHeight() }, 18.0f, Theme::ink, Justification::centredLeft);
+    {
+        const String why = cutBtn.getToggleState() ? "EXACTLY THE ROWS, CUT OFF AT THE END"
+                         : ringBtn.getToggleState() ? "LONGER: THE SOUND RINGS OUT (UP TO 4 S)"
+                                                    : "EXACTLY THE ROWS, AS THE PATTERN SOUNDS WHEN IT LOOPS: NO SEAM";
+        Theme::text (g, why, { (float) loopBtn.getX(), (float) loopBtn.getBottom() + 6.0f, p.getRight() - loopBtn.getX() - 20.0f, 20.0f },
+                     14.0f, Theme::ink.withAlpha (0.7f));
+    }
+    Theme::text (g, "VST EFFECTS AND MIDI INSTRUMENTS ARE NOT IN THE SAMPLE",
+                 { p.getX() + 22.0f, (float) goBtn.getY() - 40.0f, p.getWidth() - 44.0f, 22.0f }, 14.0f, Theme::ink.withAlpha (0.7f));
+    if (! trackMode.getState() && chosenTracks() == 0)
+        Theme::text (g, "CHOOSE AT LEAST ONE TRACK", { (float) trackButtons[8]->getRight() + 16.0f, (float) trackButtons[8]->getY(), 300.0f, (float) trackButtons[8]->getHeight() },
+                     15.0f, Colour (0xffd9342b), Justification::centredLeft);
+}
+
+void ResampleDialog::resized()
+{
+    const int w = jmin (1000, getWidth() - 30), h = jmin (640, getHeight() - 24);
+    panel = Rectangle<int> (w, h).withCentre (getLocalBounds().getCentre());
+    const int x = panel.getX(), y = panel.getY();
+    patternBox.setBounds (x + 140, y + 98, 140, 48);
+    range.setBounds (x + 310, y + 98, 440, 48);
+    blockBtn.setBounds (panel.getRight() - 210, y + 98, 190, 48);
+    fromBox.setBounds (x + 450, y + 158, 140, 48);
+    toBox.setBounds (x + 730, y + 158, 140, 48);
+    trackMode.setBounds (x + 140, y + 236, 460, 48);
+    const int bw = 54, bh = 46, gap = 6, bx = x + 140, by = y + 296;
+    for (int c = 0; c < kNumChannels; ++c)
+        trackButtons[(size_t) c]->setBounds (bx + (c % 8) * (bw + gap), by + (c / 8) * (bh + gap), bw, bh);
+    loopBtn.setBounds (x + 140, by + 2 * (bh + gap) + 20, 120, 46);
+    cutBtn.setBounds (loopBtn.getRight() + 6, loopBtn.getY(), 110, 46);
+    ringBtn.setBounds (cutBtn.getRight() + 6, loopBtn.getY(), 160, 46);
+    normBtn.setBounds (ringBtn.getRight() + 40, loopBtn.getY(), 180, 46);
+    goBtn.setBounds (panel.getRight() - 20 - 320, panel.getBottom() - 20 - 56, 320, 56);
+    cancelBtn.setBounds (goBtn.getX() - 170, goBtn.getY(), 160, 56);
+}
+
+// ===========================================================================
 // SampleEditPage
 // ===========================================================================
 
-SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s)
+SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s), resampler (s)
 {
     for (auto* c : std::initializer_list<Component*> { &list, &numberLabel, &name, &prev, &next, &lengthVal, &rateVal, &bitsVal, &chansVal,
                                                         &curPos, &wave, &startBox, &endBox, &loopStartBox, &loopEndBox, &setStart, &setEnd,
                                                         &setLoop, &playLoop, &loopMode, &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize,
-                                                        &reverseBtn, &mix, &zoomIn, &zoomOut, &fit, &left, &right })
+                                                        &reverseBtn, &mix, &resampleBtn, &zoomIn, &zoomOut, &fit, &left, &right })
         addAndMakeVisible (c);
+    addChildComponent (resampler);
+    resampleBtn.setComponentID ("resample");
+    resampleBtn.onClick = [this] { wave.setKeysActive (false); resampler.open(); };
+    resampler.onDone = [this] { wave.clearSelection(); instrumentsChanged(); wave.zoomFit(); };
+    resampleBtn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        // a little pattern grid, an arrow, and a wave
+        g.setColour (c);
+        auto grid = r.withWidth (r.getWidth() * 0.34f).reduced (0.0f, r.getHeight() * 0.12f);
+        for (int i = 0; i < 4; ++i) g.fillRect (grid.getX(), grid.getY() + i * grid.getHeight() / 4.0f, grid.getWidth(), grid.getHeight() / 4.0f - 2.0f);
+        const float ax = grid.getRight() + 3.0f, ay = r.getCentreY();
+        Path a;
+        a.addTriangle (ax + 6.0f, ay - 5.0f, ax + 6.0f, ay + 5.0f, ax + 11.0f, ay);
+        g.fillPath (a);
+        g.fillRect (ax, ay - 1.25f, 7.0f, 2.5f);
+        Path w;
+        const float wx = ax + 13.0f, ww = r.getRight() - wx;
+        for (int i = 0; i <= 16; ++i)
+        {
+            const float px = wx + ww * i / 16.0f, py = ay - std::sin (i / 16.0f * MathConstants<float>::twoPi * 1.5f) * r.getHeight() * 0.3f;
+            if (i == 0) w.startNewSubPath (px, py); else w.lineTo (px, py);
+        }
+        g.strokePath (w, PathStrokeType (2.2f));
+    };
 
     for (auto* l : { &lengthVal, &rateVal, &bitsVal, &chansVal }) l->setScreen (true);
     numberLabel.setScreen (true);
@@ -1394,7 +1685,7 @@ SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s)
     right.onClick   = [this] { wave.scroll (1); };
 
     captions = { { &cut, "CUT" }, { &copy, "COPY" }, { &paste, "PASTE" }, { &fadeIn, "FADE IN" }, { &fadeOut, "FADE OUT" },
-                 { &normalize, "NORMALIZE" }, { &reverseBtn, "REVERSE" }, { &mix, "MIX" } };
+                 { &normalize, "NORMALIZE" }, { &reverseBtn, "REVERSE" }, { &mix, "MIX" }, { &resampleBtn, "RE-SAMPLE" } };
     for (auto& [b, t] : captions) b->setButtonText ({});
 
     instrumentsChanged();
@@ -1412,6 +1703,7 @@ void SampleEditPage::visibilityChanged()
 
 bool SampleEditPage::handleKey (const KeyPress& k)
 {
+    if (resampler.isVisible()) return resampler.handleKey (k);
     if (! wave.areKeysActive()) return false;
     const auto m = k.getModifiers();
     const int code = k.getKeyCode();
@@ -1532,7 +1824,7 @@ void SampleEditPage::paint (Graphics& g)
     Theme::drawPanel (g, editPanel.toFloat());
     Theme::text (g, "EDIT", editPanel.toFloat().translated (12.0f, 10.0f).withHeight (22.0f), 21.0f, Theme::ink, Justification::topLeft);
     for (auto& [b, t] : captions)   // shrink long captions so they stay under their own button
-        captionUnder (g, *b, t, jmin (13.0f, 13.0f * (float) (b->getWidth() + 4) / jmax (1.0f, PixelFont::getWidth (t, 13.0f))));
+        captionUnder (g, *b, t, jmin (13.0f, 13.0f * (float) (b->getWidth() - 4) / jmax (1.0f, PixelFont::getWidth (t, 13.0f))));
 
     Theme::drawPanel (g, zoomPanel.toFloat());
     Theme::text (g, "ZOOM", zoomPanel.toFloat().translated (12.0f, 10.0f).withHeight (22.0f), 21.0f, Theme::ink, Justification::topLeft);
@@ -1575,10 +1867,10 @@ void SampleEditPage::resized()
     editPanel = { x0, 552, 760, getHeight() - 552 };
     zoomPanel = { x0 + 768, 552, w - 768, getHeight() - 552 };
 
-    const int bw = 86, bh = 80;
-    PixelButton* eb[] = { &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize, &reverseBtn, &mix };
-    for (int i = 0; i < 8; ++i)
-        eb[i]->setBounds (editPanel.getX() + 12 + i * (bw + 8), editPanel.getY() + 38, bw, bh);
+    const int bw = 76, bh = 80;
+    PixelButton* eb[] = { &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize, &reverseBtn, &mix, &resampleBtn };
+    for (int i = 0; i < 9; ++i)
+        eb[i]->setBounds (editPanel.getX() + 12 + i * (bw + 6), editPanel.getY() + 38, bw, bh);
 
     const int zx = zoomPanel.getX() + 12, zy = zoomPanel.getY() + 38;
     zoomIn.setBounds (zx, zy, 60, 80);
@@ -1586,4 +1878,6 @@ void SampleEditPage::resized()
     fit.setBounds (zx + 132, zy, 60, 80);
     left.setBounds (zx + 198, zy, 60, 66);
     right.setBounds (zx + 264, zy, 60, 66);
+
+    resampler.setBounds (getLocalBounds().withTrimmedLeft (x0));
 }

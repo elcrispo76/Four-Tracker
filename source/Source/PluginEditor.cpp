@@ -9,7 +9,7 @@ using namespace ft;
 FourTrackerEditor::FourTrackerEditor (FourTrackerProcessor& p)
     : AudioProcessorEditor (&p), proc (p), state (p),
       title (state), header (state), patternView (state), strips (state), songPanel (state),
-      blockPanel (state, patternView), instrumentsPage (state), sampleEditPage (state), settingsPage (state), sampleBrowser (state)
+      blockPanel (state, patternView), instrumentsPage (state), sampleEditPage (state), settingsPage (state), sampleBrowser (state), recBar (p)
 {
     addAndMakeVisible (root);
     for (auto* c : std::initializer_list<Component*> { &title, &header, &patternView, &strips, &songPanel, &blockPanel,
@@ -43,6 +43,9 @@ FourTrackerEditor::FourTrackerEditor (FourTrackerProcessor& p)
     root.addChildComponent (sampleBrowser);
     root.addAndMakeVisible (trackCount);
     root.addAndMakeVisible (masterVolume);
+    // REC only in the program itself: in a DAW, the DAW records
+    if (proc.wrapperType == AudioProcessor::wrapperType_Standalone) root.addAndMakeVisible (recBar);
+    recBar.onStatus = [this] (const String& s) { state.setStatus (s); title.refresh(); state.changed(); };
     masterVolume.getValue = [this] { return state.engine().masterVolume.load(); };
     masterVolume.setValue = [this] (int v) { state.engine().masterVolume = v; };
     masterVolume.getFade  = [this] { return state.engine().fadeLevel.load(); };
@@ -135,7 +138,8 @@ void FourTrackerEditor::resized()
         const int right = fxBuild ? 1330 : 1446;
         trackCount.setBounds (right - 196, 18, 196, 50);
         masterVolume.setBounds (trackCount.getX() - 206, 18, 196, 50);
-        title.rightReserve = (float) (1456 - masterVolume.getX() + 10);
+        recBar.setBounds (masterVolume.getX() - 282, 18, 272, 50);
+        title.rightReserve = (float) (1456 - (recBar.isVisible() ? recBar.getX() : masterVolume.getX()) + 24);
     }
    #if FOURTRACKER_FX_HOST
     if (fxPage != nullptr) fxPage->setBounds (14, 84, 1508, 844);
@@ -345,6 +349,12 @@ bool FourTrackerEditor::keyPressed (const KeyPress& k)
     if (code == KeyPress::F2Key) { state.octave = jmin (7, state.octave + 1); title.refresh(); header.refresh(); return true; }
     if (code == KeyPress::F6Key) { state.editStep = jmax (0, state.editStep - 1); title.refresh(); header.refresh(); return true; }
     if (code == KeyPress::F7Key) { state.editStep = jmin (32, state.editStep + 1); title.refresh(); header.refresh(); return true; }
+    // REC / STOP (the program only): F3 / F4 without Shift or Ctrl (with them they cut / copy tracks and blocks)
+    if (recBar.isVisible() && ! mods.isShiftDown() && ! mods.isCommandDown() && ! mods.isCtrlDown())
+    {
+        if (code == KeyPress::F3Key) { recBar.pressRec();  return true; }
+        if (code == KeyPress::F4Key) { recBar.pressStop(); return true; }
+    }
     if (code == KeyPress::F9Key)  { showPage (Page::Tracks); return true; }
     if (code == KeyPress::F10Key) { showPage (Page::Instruments); return true; }
     if (code == KeyPress::F11Key) { showPage (Page::SampleEdit); return true; }

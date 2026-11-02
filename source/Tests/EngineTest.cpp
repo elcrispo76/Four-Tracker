@@ -9,6 +9,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <thread>
+#include <set>
 #include <cstdlib>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "PluginProcessor.h"
@@ -899,6 +900,57 @@ int main (int argc, char** argv)
                 file.deleteFile();
                 FileOutputStream fos (file);
                 PNGImageFormat().writeImageToStream (img, fos);
+            }
+
+            // RE-SAMPLE: the button on Sample Edit opens the dialog; choose tracks, render into an empty slot
+            int emptySlot = -1;
+            for (int i = ft::kNumInstruments - 1; i >= 1 && emptySlot < 0; --i) if (pb->getInstrument (i).isEmpty()) emptySlot = i;
+            auto* sep = dynamic_cast<SampleEditPage*> (findC (*edb, [] (Component& c) { return dynamic_cast<SampleEditPage*> (&c) != nullptr; }));
+            CHECK (sep != nullptr && emptySlot > 0, "RE-SAMPLE: Sample Edit page and an empty slot (" + String (emptySlot) + ")");
+            if (sep != nullptr && emptySlot > 0)
+            {
+                pb->selectedInstrument = emptySlot;
+                auto* rsBtn = dynamic_cast<Button*> (findC (*sep, [] (Component& c) { return c.getComponentID() == "resample"; }));
+                if (rsBtn) rsBtn->triggerClick();
+                MessageManager::getInstance()->runDispatchLoopUntil (40);
+                CHECK (sep->resampler.isVisible(), "RE-SAMPLE button opens the dialog");
+                // CHOOSE TRACKS: 1 and 3
+                auto* choose = dynamic_cast<Button*> (findC (sep->resampler, [] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == "CHOOSE TRACKS"; }));
+                if (choose) choose->triggerClick();
+                MessageManager::getInstance()->runDispatchLoopUntil (20);
+                for (int t : { 1, 2, 3, 4 })
+                    if (auto* tb = dynamic_cast<Button*> (findC (sep->resampler, [t] (Component& c) { auto* b = dynamic_cast<PixelButton*> (&c); return b && b->getButtonText() == String (t); })))
+                        tb->triggerClick();
+                MessageManager::getInstance()->runDispatchLoopUntil (20);
+                const auto rq = sep->resampler.request();
+                CHECK (rq.tracks == 0xfu && rq.fromRow == 0 && rq.toRow == eb.getPattern (rq.pattern).getNumRows() - 1 && rq.ending == FourTrackerProcessor::ResampleRequest::loopEnd,
+                       "RE-SAMPLE dialog: CHOOSE TRACKS 1 - 4, whole pattern, LOOP (tracks " + String::toHexString ((int) rq.tracks) + ")");
+                {
+                    auto img = edb->createComponentSnapshot (edb->getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("23_resample.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                }
+                {
+                    // something to hear: the stereo sample on track 1, row 00 and row 10
+                    const ScopedLock sl (eb.getDataLock());
+                    auto& pat = eb.getPattern (rq.pattern);
+                    for (int row : { 0, 16 }) { pat.at (row, 0).note = (uint8_t) ft::kNativeNote; pat.at (row, 0).inst = 4; }
+                }
+                sep->resampler.handleKey (KeyPress (KeyPress::returnKey));   // Enter re-samples
+                MessageManager::getInstance()->runDispatchLoopUntil (40);
+                CHECK (! sep->resampler.isVisible() && ! pb->getInstrument (emptySlot).isEmpty() && pb->getInstrument (emptySlot).data->getNumChannels() == 2,
+                       "RE-SAMPLE: Enter renders into the slot (" + pb->getInstrument (emptySlot).name + ")");
+
+                if (screens)
+                {
+                    auto img = edb->createComponentSnapshot (edb->getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("24_resampled.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                }
             }
         }
         rb.run (2);
@@ -2271,6 +2323,334 @@ int main (int argc, char** argv)
         play (outMasterSilent);
         CHECK (seen > 0.0 && outMasterSilent < 1e-9, "master insert: what it does is what comes out (silenced: " + String (outMasterSilent) + ")");
         er.masterInsert = nullptr;
+    }
+
+    // unsaved changes: the program asks before closing when the song changed since SAVE / LOAD / NEW
+    {
+        auto pu = std::make_unique<FourTrackerProcessor>();
+        CHECK (! pu->hasUnsavedChanges(), "a fresh start (the demo song) has no unsaved changes");
+        { const ScopedLock sl (pu->getEngine().getDataLock()); pu->getEngine().getPattern (5).at (3, 1).note = 30; }
+        CHECK (pu->hasUnsavedChanges(), "a note written: unsaved changes");
+        auto mf = outDir.getChildFile ("unsaved test.ftm");
+        CHECK (pu->saveModule (mf) && ! pu->hasUnsavedChanges() && pu->currentModuleFile == mf, "SAVE MODULE: no unsaved changes, and it remembers the file");
+        pu->getEngine().bpm = 140;
+        CHECK (pu->hasUnsavedChanges(), "BPM changed: unsaved changes");
+        pu->loadModule (mf);
+        CHECK (! pu->hasUnsavedChanges(), "LOAD MODULE: no unsaved changes");
+        pu->getInstrument (2).params.volume = 10;
+        CHECK (pu->hasUnsavedChanges(), "an instrument's volume changed: unsaved changes");
+        pu->newPatternSet();
+        CHECK (! pu->hasUnsavedChanges() && pu->currentModuleFile == File(), "NEW MODULE: a clean start");
+        pu->getEngine().numChannels = 8;
+        CHECK (pu->hasUnsavedChanges(), "a new pattern set with more tracks: unsaved changes");
+        { auto& in = pu->getInstrument (1); in.data = new ft::SampleData(); in.data->buffer.setSize (1, 10); in.resetPoints(); }
+        pu->markSaved();
+        { auto& in = pu->getInstrument (1); AudioBuffer<float> clip; in.cut (2, 4, clip); }
+        CHECK (pu->hasUnsavedChanges(), "a sample edit (CUT): unsaved changes");
+    }
+
+    // REC: the jam (everything you hear) to a file, saved as MP3 / FLAC / WAV
+    {
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Standalone);   // REC is in the program only
+        auto pj = std::make_unique<FourTrackerProcessor>();
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+        pj->setPlayConfigDetails (0, 2, 44100.0, Runner::block);
+        pj->prepareToPlay (44100.0, Runner::block);
+        auto& rec = pj->getRecorder();
+        CHECK (rec.start (44100.0, 2).isEmpty() && rec.isRecording(), "REC starts");
+        pj->getEngine().requestStart();
+        Runner rj { *pj };
+        rj.run (690);                                   // ~4 s
+        rec.stop();
+        pj->getEngine().requestStop();
+        CHECK (! rec.isRecording() && rec.hasTake() && std::abs (rec.getSeconds() - 690.0 * Runner::block / 44100.0) < 0.01,
+               "STOP: a take of " + String (rec.getSeconds(), 2) + " s waits to be saved");
+        AudioFormatManager fm; fm.registerBasicFormats();
+        auto readBack = [&] (const File& f, AudioBuffer<float>& into)
+        {
+            std::unique_ptr<AudioFormatReader> r (fm.createReaderFor (f));
+            if (r == nullptr) return 0.0;
+            into.setSize ((int) r->numChannels, (int) r->lengthInSamples);
+            r->read (&into, 0, (int) r->lengthInSamples, 0, true, true);
+            return r->sampleRate;
+        };
+        const int n = 690 * Runner::block;
+        for (auto [fmt, name] : { std::pair<JamRecorder::Format, const char*> { JamRecorder::Format::wav, "jam test.wav" },
+                                   { JamRecorder::Format::flac, "jam test.flac" }, { JamRecorder::Format::mp3, "jam test.mp3" } })
+        {
+            auto f = outDir.getChildFile (name);
+            f.deleteFile();
+            std::atomic<float> prog { 0.0f };
+            const auto err = rec.save (f, fmt, &prog);
+            AudioBuffer<float> back;
+            const double sr = err.isEmpty() ? readBack (f, back) : 0.0;
+            double diff = 0.0;
+            if (fmt != JamRecorder::Format::mp3)
+                for (int i = 0; i < jmin (n, back.getNumSamples()); ++i) diff = jmax (diff, (double) std::abs (back.getSample (0, i) - rj.all.getSample (0, i)));
+            const bool lengthOk = fmt == JamRecorder::Format::mp3 ? std::abs (back.getNumSamples() - n) < 4000 : back.getNumSamples() == n;
+            CHECK (err.isEmpty() && sr == 44100.0 && back.getNumChannels() == 2 && lengthOk && prog.load() == 1.0f
+                     && (fmt == JamRecorder::Format::mp3 || diff < 1.0e-5) && back.getMagnitude (0, back.getNumSamples()) > 0.05f,
+                   String ("REC saved as ") + name + " (" + String (f.getSize() / 1024) + " KB, " + String (back.getNumSamples()) + " samples"
+                     + (fmt == JamRecorder::Format::mp3 ? String() : ", same sound as played, max diff " + String (diff, 7)) + ") " + err);
+        }
+        {
+            AudioBuffer<float> mp3;
+            readBack (outDir.getChildFile ("jam test.mp3"), mp3);
+            const auto mp3Size = outDir.getChildFile ("jam test.mp3").getSize(), wavSize = outDir.getChildFile ("jam test.wav").getSize();
+            CHECK (mp3Size * 3 < wavSize, "MP3 is much smaller than the WAV (" + String (mp3Size / 1024) + " vs " + String (wavSize / 1024) + " KB)");
+        }
+        const auto takeF = rec.getTakeFile();
+        rec.discard();
+        CHECK (! rec.hasTake() && ! takeF.existsAsFile(), "THROW AWAY deletes the take");
+        // a new take after a mistake: REC again starts from zero
+        rec.start (44100.0, 2);
+        rj.run (20);
+        rec.stop();
+        CHECK (rec.hasTake() && std::abs (rec.getSeconds() - 20.0 * Runner::block / 44100.0) < 0.01, "record again: a fresh take");
+        rec.discard();
+        // a take left by a crash is kept as "Unsaved jam ..."
+        {
+            JamRecorder::folder().createDirectory();
+            auto left = JamRecorder::folder().getChildFile ("REC in progress.wav");
+            outDir.getChildFile ("jam test.wav").copyFileTo (left);
+            auto unsaved = [] { int k = 0; for (auto& f : JamRecorder::folder().findChildFiles (File::findFiles, false, "*.wav")) if (f.getFileName().startsWith ("Unsaved jam")) ++k; return k; };
+            const int before = unsaved();
+            JamRecorder::rescueLeftover();
+            const auto rescued = JamRecorder::folder().findChildFiles (File::findFiles, false, "*.wav");
+            CHECK (! left.existsAsFile() && unsaved() == before + 1, "a take left by a crash is kept as \"Unsaved jam ...\" (left " + String ((int) left.existsAsFile())
+                     + ", before " + String (before) + ", after " + String (rescued.size()) + ", copied size " + String (outDir.getChildFile ("jam test.wav").getSize()) + ")");
+            for (auto& f : rescued) if (f.getFileName().startsWith ("Unsaved jam")) f.deleteFile();
+        }
+
+        // the title bar: REC / STOP
+        std::unique_ptr<AudioProcessorEditor> base (pj->createEditor());
+        auto* edj = dynamic_cast<FourTrackerEditor*> (base.get());
+        if (edj != nullptr)
+        {
+            edj->setSize (1536, 1024);
+            edj->recBar.startRecording();
+            pj->getEngine().requestStart();
+            rj.run (380);
+            MessageManager::getInstance()->runDispatchLoopUntil (300);
+            CHECK (pj->getRecorder().isRecording() && edj->recBar.isVisible(), "REC in the title bar (the program) records");
+            {
+                auto plug = std::make_unique<FourTrackerProcessor>();     // the VST3 plugin: no REC
+                std::unique_ptr<AudioProcessorEditor> pe (plug->createEditor());
+                auto* pfe = dynamic_cast<FourTrackerEditor*> (pe.get());
+                CHECK (pfe != nullptr && ! pfe->recBar.isVisible(), "no REC in the plugin (VST3 / VST2): the DAW records there");
+            }
+            {
+                auto img = edj->createComponentSnapshot ({ 0, 0, 1536, 90 }, true, 1.0f);
+                auto file = outDir.getChildFile ("25_rec.png");
+                file.deleteFile();
+                FileOutputStream fos (file);
+                PNGImageFormat().writeImageToStream (img, fos);
+            }
+            edj->recBar.stopRecording (false);
+            pj->getEngine().requestStop();
+            auto dest = outDir.getChildFile ("jam from the bar.mp3");
+            dest.deleteFile();
+            edj->recBar.saveTake (dest, JamRecorder::Format::mp3, true);
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            CHECK (dest.existsAsFile() && dest.getSize() > 10000 && ! pj->getRecorder().hasTake() && edj->recBar.lastSaved == dest,
+                   "STOP, then SAVE AS MP3 from the title bar (" + String (dest.getSize() / 1024) + " KB), the take is cleared");
+            // the keys: F3 = REC, F4 = STOP
+            edj->keyPressed (KeyPress (KeyPress::F3Key));
+            rj.run (40);
+            const bool recByKey = pj->getRecorder().isRecording();
+            edj->keyPressed (KeyPress (KeyPress::F4Key));
+            MessageManager::getInstance()->runDispatchLoopUntil (50);
+            CHECK (recByKey && ! pj->getRecorder().isRecording() && pj->getRecorder().hasTake(), "F3 starts REC, F4 stops it (the take waits to be saved)");
+            PopupMenu::dismissAllActiveMenus();
+            MessageManager::getInstance()->runDispatchLoopUntil (50);
+            pj->getRecorder().discard();
+        }
+        base.reset();
+    }
+
+    // single patterns (.ftpat): saved with their instruments, loaded into an empty pattern of another song
+    {
+        auto src = std::make_unique<FourTrackerProcessor>();
+        src->prepareToPlay (44100.0, Runner::block);
+        auto& es = src->getEngine();
+        // pattern 0 of the demo, with a tempo command and something on track 8
+        {
+            const ScopedLock sl (es.getDataLock());
+            es.getPattern (0).at (4, 0).fx = 0x0F; es.getPattern (0).at (4, 0).param = 0x90;
+        }
+        src->setNumChannels (8);
+        {
+            const ScopedLock sl (es.getDataLock());
+            es.getPattern (0).at (8, 7) = { (uint8_t) ft::kNativeNote, 1, 0x0C, 0x20 };
+        }
+        std::set<int> usedInsts;
+        for (int r = 0; r < es.getPattern (0).getNumRows(); ++r) for (int c = 0; c < 8; ++c) if (es.getPattern (0).at (r, c).inst) usedInsts.insert (es.getPattern (0).at (r, c).inst);
+        auto pf = outDir.getChildFile ("test pattern.ftpat");
+        pf.deleteFile();
+        CHECK (src->savePattern (0, pf).isEmpty() && pf.existsAsFile(), "SAVE PATTERN writes " + pf.getFileName() + " (" + String (pf.getSize() / 1024) + " KB, " + String ((int) usedInsts.size()) + " instruments)");
+        CHECK (src->savePattern (ft::kMaxPatterns - 1, outDir.getChildFile ("empty.ftpat")).contains ("EMPTY"), "SAVE PATTERN of an empty pattern says so");
+
+        auto dst = std::make_unique<FourTrackerProcessor>();
+        dst->prepareToPlay (44100.0, Runner::block);
+        dst->newPatternSet();
+        auto& ed = dst->getEngine();
+        ed.bpm = 140; ed.speed = 5;
+        // one instrument already in the song: the empty slots are found around it
+        dst->getInstrument (1).data = new ft::SampleData(); dst->getInstrument (1).data->buffer.setSize (1, 100); dst->getInstrument (1).name = "MINE";
+        dst->getInstrument (1).resetPoints(); dst->instrumentChanged (1);
+        bool ok = false;
+        auto msg = dst->loadPattern (pf, 3, ok);
+        CHECK (ok && ed.bpm.load() == 140 && ed.speed.load() == 5, "LOAD PATTERN keeps the song's BPM and SPEED: " + msg);
+        CHECK (ed.getPattern (4 - 1).at (4, 0).fx == 0 && msg.contains ("TEMPO"), "LOAD PATTERN takes the tempo command (Fxx) out");
+        CHECK (ed.numChannels.load() == 8 && ed.getPattern (3).at (8, 7).note == ft::kNativeNote, "LOAD PATTERN adds tracks when the pattern has more (8)");
+        bool same = true, mapped = true;
+        for (int r = 0; r < es.getPattern (0).getNumRows(); ++r)
+            for (int c = 0; c < 8; ++c)
+            {
+                const auto& a1 = es.getPattern (0).at (r, c);
+                const auto& b1 = ed.getPattern (3).at (r, c);
+                if (a1.note != b1.note || (a1.fx != b1.fx && a1.fx != 0x0F)) same = false;
+                if (a1.inst != 0 && (b1.inst == 0 || b1.inst == 1 || dst->getInstrument (b1.inst).name != src->getInstrument (a1.inst).name)) mapped = false;
+            }
+        CHECK (same && mapped && ed.getPattern (3).getNumRows() == es.getPattern (0).getNumRows(), "LOAD PATTERN: the same notes, the instruments come along (renumbered round slot 01)");
+        CHECK (dst->getInstrument (1).name == "MINE", "LOAD PATTERN leaves the song's own instruments alone");
+        int slotsBefore = 0; for (int i = 1; i < ft::kNumInstruments; ++i) if (! dst->getInstrument (i).isEmpty()) ++slotsBefore;
+        msg = dst->loadPattern (pf, 5, ok);
+        int slotsAfter = 0; for (int i = 1; i < ft::kNumInstruments; ++i) if (! dst->getInstrument (i).isEmpty()) ++slotsAfter;
+        CHECK (ok && slotsAfter == slotsBefore && msg.contains ("ALREADY HERE"), "LOAD PATTERN again: the same sounds are used again, no new slots: " + msg);
+        msg = dst->loadPattern (pf, 3, ok);
+        CHECK (! ok && msg.contains ("NOT EMPTY"), "LOAD PATTERN never writes over a pattern: " + msg);
+        CHECK (dst->findEmptyPattern (3) == 4, "the next empty pattern after 03 is 04");
+        // no room for the instruments
+        auto full = std::make_unique<FourTrackerProcessor>();
+        full->newPatternSet();
+        for (int i = 1; i < ft::kNumInstruments; ++i)
+        {
+            full->getInstrument (i).data = new ft::SampleData(); full->getInstrument (i).data->buffer.setSize (1, 10 + i);
+            full->getInstrument (i).name = "X" + String (i); full->getInstrument (i).resetPoints();
+        }
+        msg = full->loadPattern (pf, 0, ok);
+        CHECK (! ok && msg.contains ("NOT ENOUGH EMPTY INSTRUMENT SLOTS") && full->getEngine().getPattern (0).isEmpty(), "LOAD PATTERN with no free slots says so and changes nothing: " + msg);
+        msg = dst->loadPattern (outDir.getChildFile ("STEREO TEST.WAV"), 6, ok);
+        CHECK (! ok && msg.contains ("NOT A FOUR TRACKER PATTERN"), "LOAD PATTERN of another file: " + msg);
+    }
+
+    // RE-SAMPLE: a pattern (some rows, some tracks) rendered offline into a slot
+    {
+        auto pr = std::make_unique<FourTrackerProcessor>();
+        pr->prepareToPlay (44100.0, Runner::block);
+        auto& er = pr->getEngine();
+        int slotR = -1;
+        for (int i = ft::kNumInstruments - 1; i >= 1 && slotR < 0; --i) if (pr->getInstrument (i).isEmpty()) slotR = i;
+        const double rowSamples = 44100.0 * 2.5 / er.bpm.load() * er.speed.load();
+        FourTrackerProcessor::ResampleRequest rq;
+        using RQ = FourTrackerProcessor::ResampleRequest;
+        rq.pattern = 0; rq.fromRow = 0; rq.toRow = 15; rq.ending = RQ::cutEnd; rq.tracks = 0xffffu;
+        bool ok = false;
+        const auto t0 = Time::getMillisecondCounterHiRes();
+        auto msg = pr->resampleInto (slotR, rq, ok);
+        const auto ms = Time::getMillisecondCounterHiRes() - t0;
+        const int lenAll = ok ? pr->getInstrument (slotR).data->getLength() : 0;
+        CHECK (ok && std::abs (lenAll - 16.0 * rowSamples) <= 1.0, "RE-SAMPLE rows 00-0F, no tail: exactly 16 rows long (" + String (lenAll) + " = "
+                 + String (16.0 * rowSamples, 0) + ") in " + String (ms, 0) + " ms: " + msg);
+        CHECK (pr->getInstrument (slotR).name == "RS P00 ALL" && pr->getInstrument (slotR).data->getNumChannels() == 2, "RE-SAMPLE: a stereo sample named " + pr->getInstrument (slotR).name);
+        auto energy = [&] { auto& b = pr->getInstrument (slotR).data->buffer; double e = 0; for (int c = 0; c < 2; ++c) for (int i = 0; i < b.getNumSamples(); ++i) e += (double) b.getSample (c, i) * b.getSample (c, i); return e; };
+        const double eAll = energy();
+        rq.fromRow = 4; rq.toRow = 7;
+        pr->resampleInto (slotR, rq, ok);
+        CHECK (ok && std::abs (pr->getInstrument (slotR).data->getLength() - 4.0 * rowSamples) <= 1.0, "RE-SAMPLE rows 04-07: 4 rows long");
+        // one row: CUT = exactly 1 row, RING OUT = longer, LOOP = exactly 1 row with the ringing end laid over the start
+        rq.fromRow = 0; rq.toRow = 0; rq.ending = RQ::cutEnd;
+        pr->resampleInto (slotR, rq, ok);
+        const int oneRow = ok ? pr->getInstrument (slotR).data->getLength() : 0;
+        AudioBuffer<float> cutBuf (pr->getInstrument (slotR).data->buffer);
+        CHECK (ok && std::abs (oneRow - rowSamples) <= 1.0 && ! pr->getInstrument (slotR).params.loop, "RE-SAMPLE CUT: exactly 1 row, no loop");
+        rq.ending = RQ::ringOut;
+        msg = pr->resampleInto (slotR, rq, ok);
+        CHECK (ok && pr->getInstrument (slotR).data->getLength() > oneRow, "RE-SAMPLE RING OUT: longer, the sound rings out (" + String (pr->getInstrument (slotR).data->getLength()) + ")");
+        AudioBuffer<float> ringBuf (pr->getInstrument (slotR).data->buffer);
+        rq.ending = RQ::loopEnd;
+        msg = pr->resampleInto (slotR, rq, ok);
+        {
+            auto& in = pr->getInstrument (slotR);
+            const int len = ok ? in.data->getLength() : 0;
+            // the loop's first sample = the cut sample's first + the ringing tail that follows the last row (scaled alike)
+            const float gLoop = ok ? in.data->buffer.getSample (0, 1) : 0.0f;
+            double diff = 0.0, ref = 0.0;
+            for (int i = 0; i < jmin (len, cutBuf.getNumSamples()); ++i) { diff += std::abs (in.data->buffer.getSample (0, i) - cutBuf.getSample (0, i)); ref += std::abs (cutBuf.getSample (0, i)); }
+            ignoreUnused (gLoop);
+            CHECK (ok && len == oneRow && in.params.loop && in.params.loopStart == 0 && in.params.loopEnd == len - 1,
+                   "RE-SAMPLE LOOP: exactly 1 row long, loop set over the whole sample: " + msg);
+            ignoreUnused (diff, ref);
+            CHECK (ringBuf.getNumSamples() > oneRow, "RE-SAMPLE RING OUT is longer than LOOP and CUT");
+            // seamless: the jump from the last sample to the first is no bigger than the sound's own steps
+            float maxStep = 0.0f;
+            for (int i = 1; i < len; ++i) maxStep = jmax (maxStep, std::abs (in.data->buffer.getSample (0, i) - in.data->buffer.getSample (0, i - 1)));
+            const float seam = std::abs (in.data->buffer.getSample (0, 0) - in.data->buffer.getSample (0, len - 1));
+            CHECK (seam <= maxStep * 1.01f + 1.0e-6f, "RE-SAMPLE LOOP: no jump at the loop point (" + String (seam, 4) + " <= " + String (maxStep, 4) + ")");
+        }
+        rq.ending = RQ::cutEnd;
+        // LOOP with a note that never stops (a looped sample, like a synth bass): played twice, the second time kept,
+        // so the note heard is the one that row 00 starts again - not two notes on top of each other
+        {
+            const int susSlot = slotR - 1;
+            auto& sus = pr->getInstrument (susSlot);
+            sus.clear();
+            sus.data = new ft::SampleData();
+            sus.data->buffer.setSize (1, 4410);
+            for (int i = 0; i < 4410; ++i) sus.data->buffer.setSample (0, i, 0.5f * (float) std::sin (2.0 * MathConstants<double>::pi * 100.0 * i / 44100.0));
+            sus.data->sampleRate = 44100.0;
+            sus.name = "SUSTAIN";
+            sus.resetPoints();
+            sus.params.loop = true; sus.params.loopStart = 0; sus.params.loopEnd = 4409;
+            pr->instrumentChanged (susSlot);
+            const int susPat = ft::kMaxPatterns - 2;
+            {
+                const ScopedLock sl (er.getDataLock());
+                auto& pat = er.getPattern (susPat);
+                pat.clear();
+                pat.numRows = 64;
+                pat.at (0, 0) = { (uint8_t) ft::kNativeNote, (uint8_t) susSlot, 0, 0 };
+            }
+            RQ lq; lq.pattern = susPat; lq.fromRow = 0; lq.toRow = 63; lq.tracks = 0x1u; lq.ending = RQ::loopEnd;
+            bool okL = false;
+            const auto lmsg = pr->resampleInto (slotR, lq, okL);
+            auto& b = pr->getInstrument (slotR).data->buffer;
+            const int half = b.getNumSamples() / 2;
+            auto rmsOf = [&] (int a0, int a1) { double e = 0; for (int i = a0; i < a1; ++i) e += (double) b.getSample (0, i) * b.getSample (0, i); return 10.0 * std::log10 (e / jmax (1, a1 - a0) + 1e-12); };
+            const double first = rmsOf (2000, half), second = rmsOf (half, b.getNumSamples());
+            CHECK (okL && std::abs (b.getNumSamples() - 64.0 * rowSamples) <= 1.0 && std::abs (first - second) < 1.0,
+                   "RE-SAMPLE LOOP, a note that never stops: not doubled at the start (first half " + String (first, 1) + " dB, second half "
+                     + String (second, 1) + " dB): " + lmsg);
+            sus.clear(); pr->instrumentChanged (susSlot);
+        }
+        // one track at a time: each is a different sound from all of them together
+        ignoreUnused (eAll);
+        AudioBuffer<float> allTracks (pr->getInstrument (slotR).data->buffer);
+        int playedTracks = 0, different = 0;
+        for (int t = 0; t < er.numChannels.load(); ++t)
+        {
+            rq.tracks = 1u << t;
+            pr->resampleInto (slotR, rq, ok);
+            if (! ok) continue;
+            ++playedTracks;
+            auto& b = pr->getInstrument (slotR).data->buffer;
+            double d = 0;
+            for (int i = 0; i < jmin (b.getNumSamples(), allTracks.getNumSamples()); ++i) d += std::abs (b.getSample (0, i) - allTracks.getSample (0, i));
+            if (d > 1.0) ++different;
+        }
+        CHECK (playedTracks >= 2 && different == playedTracks, "RE-SAMPLE one track at a time: " + String (playedTracks) + " tracks with sound, each its own");
+        rq.pattern = ft::kMaxPatterns - 1; rq.tracks = 0xffffu;   // an empty pattern
+        msg = pr->resampleInto (slotR, rq, ok);
+        CHECK (! ok && msg.contains ("SILENT"), "RE-SAMPLE an empty pattern: " + msg);
+        rq.pattern = 0; rq.tracks = 0;
+        msg = pr->resampleInto (slotR, rq, ok);
+        CHECK (! ok && msg == "NO TRACKS CHOSEN", "RE-SAMPLE with no tracks: " + msg);
+        rq.tracks = 0xffffu; rq.normalise = true;
+        pr->resampleInto (slotR, rq, ok);
+        const float mag = ok ? pr->getInstrument (slotR).data->buffer.getMagnitude (0, pr->getInstrument (slotR).data->getLength()) : 0.0f;
+        CHECK (ok && std::abs (mag - 0.98f) < 0.005f, "RE-SAMPLE NORMALIZE: the loudest point at 0.98 (" + String (mag, 3) + ")");
+        CHECK (! er.playing.load(), "RE-SAMPLE doesn't start or disturb the song");
     }
 
     // a sample slot turned into SYNTH 1 / SYNTH 2 / MIDI keeps its sample: SAMPLE brings it back

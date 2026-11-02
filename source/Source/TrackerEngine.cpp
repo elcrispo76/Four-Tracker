@@ -1504,6 +1504,12 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
         if (playingAtStart) insertSamples += n;
     }
 
+    if (rawOutput.load())
+    {
+        if (out.getNumChannels() == 1) for (int i = 0; i < n; ++i) L[i] = 0.5f * (L[i] + R[i]);
+        return;
+    }
+
     // master gain + soft knee limiter so four loud channels never clip hard
     const float master = (float) masterVolume.load() / 100.0f * 0.7f;
     if (fadeRequest.exchange (false)) toggleFade();

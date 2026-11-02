@@ -75,6 +75,13 @@ private:
     PixelButton start { "START", PixelButton::Style::Raised, 16.0f }, stop { "STOP", PixelButton::Style::Raised, 16.0f },
                 newSet { "NEW", PixelButton::Style::Raised, 16.0f },
                 load { "LOAD", PixelButton::Style::Raised, 16.0f }, save { "SAVE", PixelButton::Style::Raised, 16.0f };
+public:
+    PixelButton loadPat { "LOAD", PixelButton::Style::Raised, 16.0f }, savePat { "SAVE", PixelButton::Style::Raised, 16.0f };
+    /** LOAD PATTERN without the file dialog (for the tests): into the pattern in view if it is empty, else the next empty one. */
+    void loadPatternFile (const juce::File& f);
+    void savePatternFile (const juce::File& f);
+    static juce::File patternFolder();
+private:
     ValueBox length { 1, ft::kMaxRows, ft::kDefaultRows, 32.0f };
     std::unique_ptr<juce::FileChooser> chooser;
     juce::File lastDir { FourTrackerProcessor::getUserFolder() };
@@ -189,6 +196,46 @@ private:
 };
 
 // ===========================================================================
+// RE-SAMPLE: a pattern (or some rows / some tracks of it) becomes a sample
+// ===========================================================================
+
+class ResampleDialog : public juce::Component
+{
+public:
+    explicit ResampleDialog (EditorState& s);
+    /** Shows the dialog for the slot selected now. */
+    void open();
+    void close();
+    std::function<void()> onDone;           // after a sample was made (the page shows it)
+
+    bool handleKey (const juce::KeyPress&);  // Esc closes, Enter re-samples
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override {}   // clicks next to the panel don't reach the page
+
+    /** For the tests. */
+    FourTrackerProcessor::ResampleRequest request() const;
+    void render();
+    void useBlock();
+
+private:
+    void patternChanged();
+    void updateEnabled();
+    juce::uint32 chosenTracks() const;
+
+    EditorState& st;
+    int slot = 1;
+    ValueBox patternBox { 0, ft::kMaxPatterns - 1, 0, 22.0f }, fromBox { 0, 255, 0, 22.0f }, toBox { 0, 255, 63, 22.0f };
+    SegmentPair range { "WHOLE PATTERN", "ROWS", 16.0f }, trackMode { "ALL TRACKS", "CHOOSE TRACKS", 16.0f };
+    PixelButton blockBtn { "USE BLOCK", PixelButton::Style::Raised, 16.0f };
+    std::array<std::unique_ptr<PixelButton>, ft::kNumChannels> trackButtons;
+    PixelButton loopBtn { "LOOP", PixelButton::Style::Segment, 16.0f }, cutBtn { "CUT", PixelButton::Style::Segment, 16.0f },
+                ringBtn { "RING OUT", PixelButton::Style::Segment, 16.0f }, normBtn { "NORMALIZE", PixelButton::Style::Segment, 16.0f };
+    PixelButton goBtn { "RE-SAMPLE", PixelButton::Style::Dark, 20.0f }, cancelBtn { "CANCEL", PixelButton::Style::Raised, 18.0f };
+    juce::Rectangle<int> panel;
+};
+
+// ===========================================================================
 // Sample edit page
 // ===========================================================================
 
@@ -225,7 +272,10 @@ private:
                 setLoop { "SET LOOP", PixelButton::Style::Segment, 17.0f }, playLoop { "PLAY LOOP", PixelButton::Style::Dark, 17.0f };
     SegmentPair loopMode { "FORWARD", "REVERSE", 17.0f };
     PixelButton cut { "CUT" }, copy { "COPY" }, paste { "PASTE" }, fadeIn { "FADE IN" }, fadeOut { "FADE OUT" },
-                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" };
+                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" }, resampleBtn { "RE-SAMPLE" };
+public:
+    ResampleDialog resampler;   // public for the tests
+private:
     PixelButton zoomIn { "" }, zoomOut { "" }, fit { "FIT", PixelButton::Style::Raised, 18.0f }, left { "" }, right { "" };
 
     juce::AudioBuffer<float> clip;
