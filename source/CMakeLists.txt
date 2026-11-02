@@ -36,11 +36,11 @@ option(FOURTRACKER_HEADLESS_CHECK "Disable ALSA/X11 extensions (compile check on
 
 add_subdirectory(${JUCE_DIR} JUCE)
 
-# Windows: Standalone + VST3 (+ VST2 below). Mac: Standalone + Audio Unit, no VST.
+# Windows: Standalone + VST3 (+ VST2 below). Mac: Standalone + VST3 + Audio Unit, never VST2.
 if(APPLE)
-    set(FT_FORMATS Standalone AU)
+    set(FT_FORMATS Standalone VST3 AU)
     set(FOURTRACKER_NO_VST2 ON)
-    message(STATUS "  >>> MAC: Standalone + Audio Unit (AU)")
+    message(STATUS "  >>> MAC: Standalone + VST3 + Audio Unit (AU)")
 else()
     set(FT_FORMATS Standalone VST3)
 endif()
@@ -176,9 +176,9 @@ endif()
 
 if(FOURTRACKER_FX_HOST)
     if(APPLE)
-        # Mac: Audio Unit effects (the ones in /Library/Audio/Plug-Ins/Components), no VST
-        target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=0)
-        message(STATUS "  >>> FX-VERSION (MAC): kan hente Audio Unit-effekter")
+        # Mac: Audio Unit and VST3 effects (/Library/Audio/Plug-Ins/Components and .../VST3), never VST2
+        target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=1)
+        message(STATUS "  >>> FX-VERSION (MAC): kan hente Audio Unit- og VST3-effekter")
     else()
     target_compile_definitions(FourTracker PUBLIC FOURTRACKER_FX_HOST=1 JUCE_PLUGINHOST_VST3=1)
     endif()

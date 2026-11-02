@@ -917,7 +917,7 @@ void InstrumentsPage::savePatchDialog()
 {
     auto& in = st.proc.getInstrument (slot());
     if (! in.isSynth2()) return;
-    auto* w = new AlertWindow ("SAVE PATCH", "Name the patch. It is saved in Documents\\Four Tracker\\Synth 2 Patches.", MessageBoxIconType::NoIcon);
+    auto* w = new AlertWindow ("SAVE PATCH", "Name the patch. It is saved in " + String ("Documents/Four Tracker/Synth 2 Patches.").replaceCharacter ('/', File::getSeparatorChar()), MessageBoxIconType::NoIcon);
     w->addTextEditor ("name", in.name, "NAME");
     w->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
     w->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));

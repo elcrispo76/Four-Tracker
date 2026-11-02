@@ -37,7 +37,7 @@ public:
         if (song) msg << "Are you sure you don't want to save your progress?\n"
                          "The song has changes that aren't saved (patterns, instruments or samples).";
         if (take) msg << (song ? "\n\n" : "") << "A REC recording isn't saved. It will be kept as \"Unsaved jam\" in "
-                                                 "Documents\\Four Tracker\\Recordings.";
+                                                 + String ("Documents/Four Tracker/Recordings.").replaceCharacter ('/', File::getSeparatorChar());
         asking = true;
         const auto opts = song ? MessageBoxOptions::makeOptionsYesNoCancel (MessageBoxIconType::WarningIcon, "Close Four Tracker", msg,
                                                                             "Save...", "Don't save", "Cancel", this)

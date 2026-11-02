@@ -342,22 +342,29 @@ only load in the personal FX version.
 - A 64-bit Four Tracker loads 64-bit plugins only, and the 32-bit version 32-bit plugins only.
 - In the plugin versions (VST3 / VST2 inside a DAW), the FX page is not there: use the DAW's own effects.
 
-## Mac version (Audio Unit)
+## Mac version (VST3 + Audio Unit)
 
-`build-mac.sh` builds the Mac version: **Four Tracker.app** (with Audio Unit effects, 3 per track, and chaining)
-and **Four Tracker.component** (the Audio Unit instrument for Logic, Live, GarageBand, Reaper ...). One build runs
-on Apple Silicon and Intel Macs, macOS 11 or newer. There is no VST3 or VST2 on the Mac version.
+`build-mac.sh` builds the Mac version as one installer, `dist-mac/FourTracker-<version>-mac.pkg`. It installs
+**Four Tracker.app** (with Audio Unit and VST3 effects: 3 per track, 3 on the master, chaining, REC) in Applications,
+the **VST3** plugin and the **Audio Unit** (Logic, GarageBand, Live, Bitwig, Reaper ...) in /Library/Audio/Plug-Ins,
+and the user manual and the sample pack in /Users/Shared/Four Tracker (also copied to Documents/Four Tracker).
+Each part can be left out under "Customize". One build runs on Apple Silicon and Intel Macs, macOS 11 or newer.
+Never VST2.
 
 1. Install the Xcode command line tools (`xcode-select --install` in Terminal) and CMake (https://cmake.org/download).
-2. In Terminal, in this folder: `bash build-mac.sh` (or `bash build-mac.sh install` to also install it on that Mac).
-3. The result is `dist-mac/FourTracker-<version>-mac.dmg` with the app, the Audio Unit and a READ ME.
+2. In Terminal, in this folder: `bash build-mac.sh`.
+3. Double-click `dist-mac/FourTracker-<version>-mac.pkg`.
 
-No Mac? The GitHub repository has a workflow (`.github/workflows/build-mac.yml`) that builds the .dmg on GitHub's
-Macs: Actions → Mac build → Run workflow, or it runs by itself when a release is published and adds the .dmg to it.
+No Mac? The GitHub repository has a workflow (`.github/workflows/build-mac.yml`) that builds the .pkg on GitHub's
+Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.3`, to add the .pkg to that release).
+It also runs by itself when a release is published. The effects bundle has its own workflow
+(`build-mac-effects.yml`, "Mac build: effects bundle") that builds `FourTrackerEffects-Bundle-<version>-mac.pkg`
+from the `effects` folder.
 
-The Mac version is not signed with a paid Apple Developer ID, so the first time macOS asks: right-click the app →
-Open (or System Settings → Privacy & Security → Open Anyway). On the FX page, Audio Unit effects are found by macOS,
-so there are no folders, just press SCAN. Mac keyboards may need **fn** for the F-keys, and have no Insert key.
+The Mac version is not signed with a paid Apple Developer ID, so the first time macOS says the installer can't be
+opened: open System Settings → Privacy & Security, scroll down and click **Open Anyway**. On the FX page, Audio Units
+are found by macOS and VST3 effects in the folders listed (/Library/Audio/Plug-Ins/VST3 to begin with): press SCAN.
+Mac keyboards may need **fn** for the F-keys, and have no Insert key.
 
 ## Making an installer
 
