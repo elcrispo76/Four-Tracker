@@ -256,6 +256,10 @@ section { padding-block: 44px; }
 .yt:hover .play, .yt:focus-visible .play { filter: brightness(1.1); }
 .yt:focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
 .video-box .note { margin-top: 10px; }
+.song-dl { margin-top: 16px; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; }
+.song-dl h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.03em; }
+.song-dl p { margin-top: 8px; color: var(--ink-soft); max-width: 62ch; }
+@media (max-width: 560px) { .song-dl { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- download ---------- */
 .download-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
@@ -363,6 +367,13 @@ footer .wrap { display: grid; gap: 8px; }
           <span class="play" aria-hidden="true"></span>
         </button>
         <p class="note">Plays from YouTube. <a href="https://www.youtube.com/watch?v=Wf6AmIc4h60">Watch it on YouTube</a></p>
+      </div>
+      <div class="panel song-dl">
+        <div>
+          <h3>PLAY IT YOURSELF</h3>
+          <p>Get the song from the video, with all its patterns and sounds, and jam on it. Open it in Four Tracker with LOAD MODULE, or drag the file onto the window.</p>
+        </div>
+        <a class="btn btn-red" href="downloads/Acid_Demo.ftm" download><span class="btn-text">DOWNLOAD THE SONG<small>Acid_Demo.ftm · 200 KB</small></span></a>
       </div>
     </div>
   </section>
