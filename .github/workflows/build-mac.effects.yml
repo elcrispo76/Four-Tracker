@@ -1,0 +1,42 @@
+# Builds the Mac version of Four Tracker on GitHub's Mac machines:
+#   FourTracker-<version>-mac.pkg  (the program, the VST3 and Audio Unit plugins, the manual and the sample pack)
+# Start it by hand: Actions > "Mac build" > Run workflow. The .pkg is added to the release you type in
+# (leave the field empty to only keep it under the run's "Artifacts").
+# It also runs by itself when a Four Tracker release (tag v...) is published.
+name: Mac build
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Add the .pkg to this release (empty = don't)"
+        required: false
+        default: "v0.5.3"
+  release:
+    types: [published]
+
+jobs:
+  mac:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Four Tracker for Mac
+        run: bash source/build-mac.sh
+
+      - name: Keep the .pkg (download it under the run's "Artifacts")
+        uses: actions/upload-artifact@v4
+        with:
+          name: FourTracker-mac
+          path: source/dist-mac/*.pkg
+
+      - name: Add the .pkg to the release
+        if: github.event_name == 'release' || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+        run: gh release upload "$TAG" source/dist-mac/*.pkg --clobber --repo "$GITHUB_REPOSITORY"
