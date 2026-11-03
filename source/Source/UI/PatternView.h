@@ -34,6 +34,9 @@ public:
     void copyTrack();
     void cutTrack();
     void pasteTrack();
+    /** Moves every note in the track at the cursor (pattern in view) up or down: +-1 = a note, +-12 = an octave.
+        Note-offs, instruments and effects stay. If a note would go below C-0 or above B-7, nothing changes. */
+    void transposeTrack (int semitones);
     void clearPattern();
 
     void refreshFromEngine();   // called by the editor timer

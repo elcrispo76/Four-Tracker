@@ -102,8 +102,10 @@ public:
 private:
     EditorState& st;
     PixelButton copyTrack { "COPY" }, cutTrack { "CUT" }, pasteTrack { "PASTE" },
-                copyBlock { "COPY" }, cutBlock { "CUT" }, pasteBlock { "PASTE" };
-    juce::Rectangle<int> trackArea, blockArea;
+                copyBlock { "COPY" }, cutBlock { "CUT" }, pasteBlock { "PASTE" },
+                octDown { "DOWN" }, noteDown { "DOWN" }, noteUp { "UP" }, octUp { "UP" };
+    juce::Rectangle<int> trackArea, transposeArea, blockArea;
+    static constexpr int kLabelW = 190;
 };
 
 // ===========================================================================

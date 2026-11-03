@@ -564,6 +564,76 @@ int main (int argc, char** argv)
         CHECK (std::isfinite (r3.all.getSample (0, r3.written - 1)), "playing an empty set is safe");
     }
 
+    // TRANSPOSE the track at the cursor: Shift+1 / Shift+2 = a note up / down, Ctrl+1 / Ctrl+2 = an octave up / down,
+    // and the four buttons on the BLOCK page do the same
+    {
+        auto p5 = std::make_unique<FourTrackerProcessor>();
+        p5->prepareToPlay (44100.0, 256);
+        Runner r5 { *p5 };
+        auto& e5 = p5->getEngine();
+        std::unique_ptr<AudioProcessorEditor> ed5 (p5->createEditor());
+        ed5->setSize (1536, 1024);
+        e5.requestPattern (10);
+        r5.run (1);
+        auto& pt = e5.getPattern (10);
+        pt.clear();
+        pt.at (0, 1) = { 37, 2, 0x0C, 0x20 };        // C-3 in CH2
+        pt.at (4, 1) = { ft::kNoteOff, 0, 0, 0 };     // note off stays
+        pt.at (8, 1) = { 40, 2, 0, 0 };
+        pt.at (0, 0) = { 25, 1, 0, 0 };               // CH1 must not move
+        ed5->keyPressed (KeyPress (KeyPress::tabKey, ModifierKeys(), 0));   // cursor to CH2
+        const auto shiftKey = ModifierKeys (ModifierKeys::shiftModifier);
+        const auto ctrlKey  = ModifierKeys (ModifierKeys::ctrlModifier);
+        ed5->keyPressed (KeyPress ('1', shiftKey, '!'));
+        CHECK (pt.at (0, 1).note == 38 && pt.at (8, 1).note == 41, "Shift+1 moves the track a note up");
+        CHECK (pt.at (0, 0).note == 25, "transpose leaves the other tracks alone");
+        CHECK (pt.at (4, 1).note == ft::kNoteOff && pt.at (0, 1).inst == 2 && pt.at (0, 1).fx == 0x0C && pt.at (0, 1).param == 0x20,
+               "transpose keeps note-offs, instruments and effects");
+        ed5->keyPressed (KeyPress ('2', shiftKey, '"'));
+        CHECK (pt.at (0, 1).note == 37, "Shift+2 moves it a note down");
+        ed5->keyPressed (KeyPress ('1', ctrlKey, 0));
+        CHECK (pt.at (0, 1).note == 49 && pt.at (8, 1).note == 52, "Ctrl+1 moves it an octave up");
+        ed5->keyPressed (KeyPress ('2', ctrlKey, 0));
+        ed5->keyPressed (KeyPress ('2', ctrlKey, 0));
+        CHECK (pt.at (0, 1).note == 25, "Ctrl+2 moves it an octave down");
+        ed5->keyPressed (KeyPress ('z', ctrlKey, 'z'));
+        CHECK (pt.at (0, 1).note == 37, "Ctrl+Z undoes a transpose");
+        pt.at (8, 1).note = 92;                        // G#7: an octave up would go past B-7
+        ed5->keyPressed (KeyPress ('1', ctrlKey, 0));
+        CHECK (pt.at (8, 1).note == 92 && pt.at (0, 1).note == 37, "no change when a note would go past B-7");
+
+        // the buttons on the BLOCK page
+        std::function<PixelButton* (Component&, const String&, const String&)> findBtn =
+            [&] (Component& c, const String& t, const String& sub) -> PixelButton*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<PixelButton*> (ch))
+                    if (b->getButtonText() == t && b->subLabel == sub) return b;
+                if (auto* f = findBtn (*ch, t, sub)) return f;
+            }
+            return nullptr;
+        };
+        pt.at (8, 1).note = 40;
+        auto* up = findBtn (*ed5, "UP", "NOTE");
+        auto* octDn = findBtn (*ed5, "DOWN", "OCTAVE");
+        CHECK (up != nullptr && octDn != nullptr, "BLOCK page has the transpose buttons");
+        if (up != nullptr && octDn != nullptr)
+        {
+            up->triggerClick();
+            MessageManager::getInstance()->runDispatchLoopUntil (20);
+            CHECK (pt.at (0, 1).note == 38, "NOTE UP button transposes the track at the cursor");
+            octDn->triggerClick();
+            MessageManager::getInstance()->runDispatchLoopUntil (20);
+            CHECK (pt.at (0, 1).note == 26 && pt.at (0, 0).note == 25, "OCTAVE DOWN button transposes the track at the cursor");
+        }
+        // Shift+2 must not play or write a note (2 is a note key)
+        const auto before = pt.at (12, 1);
+        ed5->keyPressed (KeyPress (KeyPress::spaceKey, ModifierKeys(), ' '));   // EDIT on
+        ed5->keyPressed (KeyPress ('2', shiftKey, '"'));
+        CHECK (pt.at (12, 1).note == before.note && pt.at (0, 1).note == 25, "Shift+2 with EDIT on transposes, writes no note");
+    }
+
     // Ctrl+F3 / Ctrl+F4 / Ctrl+F5 = cut / copy / paste the whole pattern (all 4 channels)
     {
         auto p4 = std::make_unique<FourTrackerProcessor>();

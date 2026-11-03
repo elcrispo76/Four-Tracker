@@ -487,7 +487,7 @@ BlockPanel::BlockPanel (EditorState& s, PatternView& pv) : st (s)
     for (auto* b : { &copyTrack, &cutTrack, &pasteTrack, &copyBlock, &cutBlock, &pasteBlock })
     {
         addAndMakeVisible (b);
-        b->iconWidth = 34.0f;
+        b->iconWidth = 30.0f;
     }
     copyTrack.subLabel = cutTrack.subLabel = pasteTrack.subLabel = "TRACK";
     copyBlock.subLabel = cutBlock.subLabel = pasteBlock.subLabel = "BLOCK";
@@ -501,30 +501,53 @@ BlockPanel::BlockPanel (EditorState& s, PatternView& pv) : st (s)
     copyBlock.onClick  = [&pv] { pv.copyWholeBlock(); };
     cutBlock.onClick   = [&pv] { pv.cutWholeBlock(); };
     pasteBlock.onClick = [&pv] { pv.pasteWholeBlock(); };
+
+    // TRANSPOSE: the track at the cursor, a note or an octave at a time
+    for (auto* b : { &octDown, &noteDown, &noteUp, &octUp }) addAndMakeVisible (b);
+    octDown.subLabel = octUp.subLabel = "OCTAVE";
+    noteDown.subLabel = noteUp.subLabel = "NOTE";
+    octDown.setTooltip ("Moves every note in the track at the cursor down an octave (12 notes)");
+    noteDown.setTooltip ("Moves every note in the track at the cursor down a note");
+    noteUp.setTooltip ("Moves every note in the track at the cursor up a note");
+    octUp.setTooltip ("Moves every note in the track at the cursor up an octave (12 notes)");
+    octDown.onClick  = [&pv] { pv.transposeTrack (-12); };
+    noteDown.onClick = [&pv] { pv.transposeTrack (-1); };
+    noteUp.onClick   = [&pv] { pv.transposeTrack (1); };
+    octUp.onClick    = [&pv] { pv.transposeTrack (12); };
 }
 
 void BlockPanel::paint (Graphics& g)
 {
-    Theme::drawPanel (g, Rectangle<float> (0.0f, 0.0f, 250.0f, (float) getHeight()));
-    Theme::text (g, "BLOCK", { 0.0f, 0.0f, 250.0f, (float) getHeight() }, 46.0f, Theme::ink, Justification::centred, true);
+    Theme::drawPanel (g, Rectangle<float> (0.0f, 0.0f, (float) kLabelW, (float) getHeight()));
+    Theme::text (g, "BLOCK", { 0.0f, 0.0f, (float) kLabelW, (float) getHeight() }, 40.0f, Theme::ink, Justification::centred, true);
 
     Theme::drawPanel (g, trackArea.toFloat());
+    Theme::drawPanel (g, transposeArea.toFloat());
     Theme::drawPanel (g, blockArea.toFloat());
     Theme::text (g, "TRACK OPERATIONS", trackArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
+    Theme::text (g, "TRANSPOSE TRACK", transposeArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
     Theme::text (g, "BLOCK OPERATIONS", blockArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
+    captionUnder (g, octDown, "CTRL+2", 15.0f);
+    captionUnder (g, noteDown, "SHIFT+2", 15.0f);
+    captionUnder (g, noteUp, "SHIFT+1", 15.0f);
+    captionUnder (g, octUp, "CTRL+1", 15.0f);
 
-    captionUnder (g, cutTrack, "SHIFT+F3", 17.0f);
-    captionUnder (g, copyTrack, "SHIFT+F4", 17.0f);
-    captionUnder (g, pasteTrack, "SHIFT+F5", 17.0f);
-    captionUnder (g, cutBlock, "CTRL+F3", 17.0f);
-    captionUnder (g, copyBlock, "CTRL+F4", 17.0f);
-    captionUnder (g, pasteBlock, "CTRL+F5", 17.0f);
+    captionUnder (g, cutTrack, "SHIFT+F3", 16.0f);
+    captionUnder (g, copyTrack, "SHIFT+F4", 16.0f);
+    captionUnder (g, pasteTrack, "SHIFT+F5", 16.0f);
+    captionUnder (g, cutBlock, "CTRL+F3", 16.0f);
+    captionUnder (g, copyBlock, "CTRL+F4", 16.0f);
+    captionUnder (g, pasteBlock, "CTRL+F5", 16.0f);
 }
 
 void BlockPanel::resized()
 {
-    trackArea = { 258, 0, 590, getHeight() };
-    blockArea = { 856, 0, getWidth() - 856, getHeight() };
+    // BLOCK label | TRACK OPERATIONS | TRANSPOSE TRACK | BLOCK OPERATIONS
+    const int x0 = kLabelW + 8, rest = getWidth() - x0 - 16;
+    const int wTrack = rest * 32 / 100, wTrans = rest * 35 / 100;
+    trackArea     = { x0, 0, wTrack, getHeight() };
+    transposeArea = { trackArea.getRight() + 8, 0, wTrans, getHeight() };
+    blockArea     = { transposeArea.getRight() + 8, 0, getWidth() - transposeArea.getRight() - 8, getHeight() };
 
     auto layout = [] (Rectangle<int> area, PixelButton& a, PixelButton& b, PixelButton& c)
     {
@@ -536,6 +559,16 @@ void BlockPanel::resized()
     };
     layout (trackArea, cutTrack, copyTrack, pasteTrack);
     layout (blockArea, cutBlock, copyBlock, pasteBlock);
+    {
+        auto r = transposeArea.reduced (12, 0).withTrimmedTop (46).withHeight (76);
+        const int w = (r.getWidth() - 18) / 4;
+        for (auto* b : { &octDown, &noteDown, &noteUp })
+        {
+            b->setBounds (r.removeFromLeft (w));
+            r.removeFromLeft (6);
+        }
+        octUp.setBounds (r);
+    }
 }
 
 // ===========================================================================

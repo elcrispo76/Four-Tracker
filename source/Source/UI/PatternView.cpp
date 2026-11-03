@@ -278,6 +278,8 @@ void PatternView::moveCursor (int dRow, int dCol, bool extend)
 int PatternView::noteForKey (const KeyPress& k) const
 {
     if (k.getModifiers().isCtrlDown() || k.getModifiers().isAltDown() || k.getModifiers().isCommandDown()) return -1;
+    if (k.getModifiers().isShiftDown() && (k.getKeyCode() == '2' || k.getTextCharacter() == '"' || k.getTextCharacter() == '@'))
+        return -1;   // Shift+2 transposes the track a note down
 
     static const char lower[] = "ZSXDCVGBHNJM,L.;/";
     static const char upper[] = "Q2W3ER5T6Y7UI9O0P[=]";
@@ -329,6 +331,19 @@ bool PatternView::handleKey (const KeyPress& k)
         st.anchorRow = 0; st.anchorCh = 0; st.cursorRow = numRows() - 1; st.cursorCh = st.numChannels() - 1;
         updateSelectionFromAnchor(); repaint();
         return true;
+    }
+
+    // TRANSPOSE the track at the cursor: Shift+1 / Shift+2 = a note up / down, Ctrl+1 / Ctrl+2 = an octave up / down.
+    // (Shift+1 / 2 can arrive as '!' / '"' or '@', depending on the keyboard layout.)
+    {
+        const juce_wchar t = k.getTextCharacter();
+        const bool one = code == '1' || t == '!';
+        const bool two = code == '2' || t == '"' || t == '@';
+        if ((one || two) && ! mods.isAltDown())
+        {
+            if (ctrl)       { transposeTrack (one ? 12 : -12); return true; }
+            if (shift)      { transposeTrack (one ? 1 : -1);   return true; }
+        }
     }
 
     // F3 = cut, F4 = copy, F5 = paste (ProTracker order).
@@ -582,6 +597,40 @@ void PatternView::pasteTrack()
     for (int r = 0; r < pat.getNumRows(); ++r)
         pat.at (r, st.cursorCh) = r < (int) st.trackClip.size() ? st.trackClip[(size_t) r] : Cell();
     st.setStatus ("PASTED TRACK TO CH" + String (st.cursorCh + 1));
+    repaint();
+}
+
+void PatternView::transposeTrack (int semitones)
+{
+    auto& pat = pattern();
+    const int ch = st.cursorCh;
+    int notes = 0, lo = 999, hi = -999;
+    for (int r = 0; r < pat.getNumRows(); ++r)
+    {
+        const int n = pat.at (r, ch).note;
+        if (n < 1 || n > kNoteMax) continue;
+        ++notes; lo = jmin (lo, n); hi = jmax (hi, n);
+    }
+    const String what = std::abs (semitones) == 12 ? String ("AN OCTAVE") : String ("A NOTE");
+    if (notes == 0) { st.setStatus ("NO NOTES IN TRACK CH" + String (ch + 1)); st.changed(); return; }
+    if (lo + semitones < 1 || hi + semitones > kNoteMax)
+    {
+        st.setStatus ("CAN'T MOVE CH" + String (ch + 1) + (semitones > 0 ? " UP " : " DOWN ") + what + ": A NOTE WOULD GO PAST "
+                      + (semitones > 0 ? "B-7" : "C-0"));
+        st.changed();
+        return;
+    }
+    st.pushUndo (st.viewPattern());
+    {
+        const ScopedLock sl (st.engine().getDataLock());
+        for (int r = 0; r < pat.getNumRows(); ++r)
+        {
+            auto& c = pat.at (r, ch);
+            if (c.note >= 1 && c.note <= kNoteMax) c.note = (uint8_t) (c.note + semitones);
+        }
+    }
+    st.setStatus ("TRACK CH" + String (ch + 1) + (semitones > 0 ? " UP " : " DOWN ") + what + " (" + String (notes) + " NOTES)");
+    st.changed();
     repaint();
 }
 

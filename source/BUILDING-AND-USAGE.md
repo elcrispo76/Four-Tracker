@@ -104,6 +104,8 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the marked selection |
 | Ctrl+F3 / F4 / F5 | Cut / copy / paste the block: the whole pattern, all 4 channels and all rows (64 rows = 4 bars) |
 | Shift+F3 / F4 / F5 | Cut / copy / paste track (one whole channel) |
+| Shift+1 / Shift+2 | Transpose the track at the cursor a note up / down |
+| Ctrl+1 / Ctrl+2 | Transpose the track at the cursor an octave up / down |
 | Ctrl+Z / Ctrl+Y | Undo / redo pattern edits |
 | F3 / F4 | REC / STOP (the program only): record the jam, stop and save it |
 | F9 / F10 / F11 / F12 | Tracks / Instruments / Sample Edit / MIDI-Audio page |
@@ -356,7 +358,7 @@ Never VST2.
 3. Double-click `dist-mac/FourTracker-<version>-mac.pkg`.
 
 No Mac? The GitHub repository has a workflow (`.github/workflows/build-mac.yml`) that builds the .pkg on GitHub's
-Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.3`, to add the .pkg to that release).
+Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.4`, to add the .pkg to that release).
 It also runs by itself when a release is published. The effects bundle has its own workflow
 (`build-mac-effects.yml`, "Mac build: effects bundle") that builds `FourTrackerEffects-Bundle-<version>-mac.pkg`
 from the `effects` folder.
@@ -371,10 +373,10 @@ Mac keyboards may need **fn** for the F-keys, and have no Insert key.
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.5.3-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.5.3-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.3-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.3-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.5.4-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.4-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.4-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.4-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes
