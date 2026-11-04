@@ -80,6 +80,15 @@ public:
     /** Settings file: folders, scanned list, and each slot's plugin + its settings. */
     void saveSettings();
 
+    /** The song's effects, for a module file: each slot's plugin, settings and bypass, and the chaining.
+        nullptr when no effects are used. */
+    std::unique_ptr<juce::XmlElement> createSongXml() const;
+    /** Replaces every effect with the ones from a module (nullptr = a module without effects: all are cleared).
+        Returns how many effects could not be opened (not installed on this computer). */
+    int loadSongXml (const juce::XmlElement* xml);
+    /** The names of the effects the last loadSongXml could not open. */
+    juce::StringArray getMissingEffects() const { return missingEffects; }
+
 private:
     struct Slot
     {
@@ -139,6 +148,7 @@ private:
 
     std::unique_ptr<juce::XmlElement> pendingSlots;   // restored once audio is prepared
     bool restoring = false;
+    juce::StringArray missingEffects;
     juce::uint32 restoreDoneAt = 0;
 
     struct EditorWindow;

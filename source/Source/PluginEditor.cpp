@@ -530,7 +530,8 @@ void FourTrackerEditor::filesDropped (const StringArray& files, int, int)
         if (file.hasFileExtension ("ftm;ftps"))
         {
             auto err = proc.loadModule (file);
-            state.setStatus (err.isEmpty() ? "LOADED " + file.getFileName().toUpperCase() : err.toUpperCase());
+            const auto note = proc.takeLoadNote();
+            state.setStatus (err.isNotEmpty() ? err.toUpperCase() : note.isNotEmpty() ? note : "LOADED " + file.getFileName().toUpperCase());
         }
         else audio.add (file);
     }

@@ -337,7 +337,9 @@ only load in the personal FX version.
   **CHn > INTO CHx FX**. Pick e.g. **CH2 > INTO CH1 FX** and CH2's sound (after CH2's own effects) goes on
   through CH1's effects, so one reverb or delay can be shared by several tracks. Chains can be longer
   (CH3 into CH2 into CH1); a loop is refused. Removing a track or NEW MODULE / Empty removes its chaining.
-- The folders, the scanned list, the chosen effects, the chaining and all effect settings are saved and come back next time.
+- The effects, their settings and the chaining are saved in the module, so each song keeps its own: loading another module,
+  NEW MODULE or the demo song replaces them. An effect that isn't installed is named in the title bar, the rest loads.
+  The folders and the scanned list come back next time; the program starts with the demo song and no effects.
 - The effects get Four Tracker's tempo and song position, so tempo-synced effects (delays, the free Breakbeat
   Processor slicer from the website ...) follow the song: 4 rows to a beat (SPEED 6 at 125 = 125 BPM), and each time
   a pattern starts from the top it starts on a new bar.

@@ -944,6 +944,7 @@ void FourTrackerProcessor::newPatternSet()
 void FourTrackerProcessor::loadDemoSong()
 {
     newPatternSet();
+    clearAllEffects();      // the demo song has no VST effects
     {
         const juce::ScopedLock sl (engine.getDataLock());
         createDemoPatterns (engine);
@@ -1007,6 +1008,12 @@ bool FourTrackerProcessor::saveModule (const juce::File& file)
     t.setProperty ("version", 1, nullptr);
     t.setProperty ("name", file.getFileNameWithoutExtension(), nullptr);
     writeSong (t);
+   #if FOURTRACKER_FX_HOST
+    // the song's VST effects (each slot's plugin and settings, and the chaining) go in the module too
+    if (fx != nullptr)
+        if (auto x = fx->createSongXml())
+            t.setProperty ("effects", x->toString (juce::XmlElement::TextFormat().singleLine()), nullptr);
+   #endif
 
     juce::MemoryOutputStream raw;
     t.writeToStream (raw);
@@ -1049,9 +1056,22 @@ juce::String FourTrackerProcessor::loadModule (const juce::File& file)
         if (! t.hasType (ids::module))
             return file.getFileName() + " is damaged";
         readSong (t);
+        juce::String note;
+       #if FOURTRACKER_FX_HOST
+        // the module's own effects replace the ones in use (a module without effects clears them)
+        if (fx != nullptr)
+        {
+            std::unique_ptr<juce::XmlElement> x;
+            if (t.hasProperty ("effects")) x = juce::parseXML (t.getProperty ("effects").toString());
+            if (fx->loadSongXml (x.get()) > 0)
+                note = "LOADED " + file.getFileName().toUpperCase() + " - NOT INSTALLED HERE: "
+                       + fx->getMissingEffects().joinIntoString (", ").toUpperCase();
+        }
+       #endif
         currentModuleFile = file;
         markSaved();
         sendChangeMessage();
+        lastLoadNote = note;
         return {};
     }
 

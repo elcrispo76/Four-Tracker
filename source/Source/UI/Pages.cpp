@@ -403,7 +403,8 @@ SongPanel::SongPanel (EditorState& s) : st (s)
                 if (err.isEmpty()) { lastModule = f; lastDir = f.getParentDirectory(); }
                 st.undoStack.clear(); st.redoStack.clear();
                 st.hasSelection = false;
-                st.setStatus (err.isEmpty() ? "LOADED " + f.getFileName().toUpperCase() : err.toUpperCase());
+                const auto note = st.proc.takeLoadNote();
+                st.setStatus (err.isNotEmpty() ? err.toUpperCase() : note.isNotEmpty() ? note : "LOADED " + f.getFileName().toUpperCase());
                 st.changed();
             });
     };

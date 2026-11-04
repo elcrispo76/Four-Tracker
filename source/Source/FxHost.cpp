@@ -416,24 +416,21 @@ void FxHost::timerCallback()
 // settings file
 // ---------------------------------------------------------------------------
 
-void FxHost::saveSettings()
+std::unique_ptr<XmlElement> FxHost::createSongXml() const
 {
-    XmlElement root ("FOURTRACKER_FX");
-    root.setAttribute ("paths", searchPath.toString());
+    auto root = std::make_unique<XmlElement> ("EFFECTS");
+    bool any = false;
     {
         StringArray r;
-        for (auto& x : route) r.add (String (x.load()));
-        root.setAttribute ("routes", r.joinIntoString (","));
+        for (auto& x : route) { r.add (String (x.load())); any = any || x.load() >= 0; }
+        root->setAttribute ("routes", r.joinIntoString (","));
     }
-    if (auto k = known.createXml())
-        root.createNewChildElement ("KNOWN")->addChildElement (k.release());
-
     for (int c = 0; c < kNumFxChannels; ++c)
         for (int i = 0; i < kSlotsPerChannel; ++i)
         {
             auto& s = slots[(size_t) c][(size_t) i];
             if (s.plugin == nullptr) continue;
-            auto* e = root.createNewChildElement ("SLOT");
+            auto* e = root->createNewChildElement ("SLOT");
             e->setAttribute ("channel", c);
             e->setAttribute ("slot", i);
             e->setAttribute ("bypass", s.bypass.load());
@@ -441,12 +438,61 @@ void FxHost::saveSettings()
             MemoryBlock state;
             s.plugin->getStateInformation (state);
             e->createNewChildElement ("STATE")->addTextElement (state.toBase64Encoding());
+            any = true;
         }
-
-    // a slot still waiting to be restored is kept as it was
     if (pendingSlots != nullptr)
         for (auto* e : pendingSlots->getChildWithTagNameIterator ("SLOT"))
-            root.addChildElement (new XmlElement (*e));
+        {
+            root->addChildElement (new XmlElement (*e));
+            any = true;
+        }
+    return any ? std::move (root) : nullptr;
+}
+
+int FxHost::loadSongXml (const XmlElement* xml)
+{
+    closeAllEditors();
+    restoring = true;                 // one save + notify at the end, not one per slot
+    for (int c = 0; c < kNumFxChannels; ++c)
+        for (int i = 0; i < kSlotsPerChannel; ++i)
+            if (hasPlugin (c, i)) clearSlot (c, i);
+    restoring = false;
+    clearRoutes();
+    pendingSlots.reset();
+    missingEffects.clear();
+
+    if (xml != nullptr)
+    {
+        StringArray r; r.addTokens (xml->getStringAttribute ("routes"), ",", "");
+        for (int c = 0; c < ft::kNumChannels; ++c)
+        {
+            const int t = c < r.size() ? r[c].getIntValue() : -1;
+            route[(size_t) c] = (t >= 0 && t < ft::kNumChannels && t != c) ? t : -1;
+        }
+        auto pending = std::make_unique<XmlElement> ("SLOTS");
+        for (auto* e : xml->getChildWithTagNameIterator ("SLOT"))
+            pending->addChildElement (new XmlElement (*e));
+        if (pending->getNumChildElements() > 0) pendingSlots = std::move (pending);
+    }
+
+    if (pendingSlots != nullptr && sampleRate > 0.0)
+        restorePendingSlots();        // opens them now (otherwise once the audio starts)
+    else
+    {
+        saveSettings();
+        notify();
+    }
+    return missingEffects.size();
+}
+
+void FxHost::saveSettings()
+{
+    // the program's own settings: the plugin folders and the scanned list. The effects in the slots
+    // belong to the song and are saved in the module (createSongXml), so the program starts without any.
+    XmlElement root ("FOURTRACKER_FX");
+    root.setAttribute ("paths", searchPath.toString());
+    if (auto k = known.createXml())
+        root.createNewChildElement ("KNOWN")->addChildElement (k.release());
 
     settingsFolder().createDirectory();
     root.writeTo (settingsFolder().getChildFile ("fx-settings.xml"));
@@ -458,46 +504,24 @@ void FxHost::loadSettings()
     if (xml != nullptr)
     {
         searchPath = FileSearchPath (xml->getStringAttribute ("paths"));
-        {
-            StringArray r; r.addTokens (xml->getStringAttribute ("routes"), ",", "");
-            for (int c = 0; c < ft::kNumChannels; ++c)
-            {
-                const int t = c < r.size() ? r[c].getIntValue() : -1;
-                route[(size_t) c] = (t >= 0 && t < ft::kNumChannels && t != c) ? t : -1;
-            }
-        }
         if (auto* k = xml->getChildByName ("KNOWN"))
             if (auto* list = k->getFirstChildElement())
                 known.recreateFromXml (*list);
-        // The program closed while effects were being opened at start-up (or just after):
-        // leave the one that was loading out, or all of them if they had all loaded.
-        const auto restorePedal = settingsFolder().getChildFile ("fx-restore-in-progress.txt");
+        // older versions kept the effects here (SLOT, routes): they belong to the song now, so they are left out
+    }
+    // the program closed while a module's effects were being opened: say which one
+    const auto restorePedal = settingsFolder().getChildFile ("fx-restore-in-progress.txt");
+    if (restorePedal.existsAsFile())
+    {
         StringArray pedal;
-        if (restorePedal.existsAsFile()) { pedal.addLines (restorePedal.loadFileAsString()); pedal.removeEmptyStrings(); }
+        pedal.addLines (restorePedal.loadFileAsString());
+        pedal.removeEmptyStrings();
         restorePedal.deleteFile();
-        StringArray skip, skippedNames;
-        if (pedal.size() > 0)
-        {
-            if (pedal[pedal.size() - 1].endsWith (" LOADING")) skip.add (pedal[pedal.size() - 1]);
-            else skip = pedal;
-        }
-        // hold Shift while the program starts to open it without any effects
-        const bool skipAll = ModifierKeys::getCurrentModifiersRealtime().isShiftDown();
-
-        pendingSlots = std::make_unique<XmlElement> ("SLOTS");
-        for (auto* e : xml->getChildWithTagNameIterator ("SLOT"))
-        {
-            const String key = e->getStringAttribute ("channel") + "/" + e->getStringAttribute ("slot") + " ";
-            if (skipAll) continue;
-            bool bad = false;
-            for (auto& line : skip)
-                if (line.startsWith (key)) { bad = true; skippedNames.add (line.fromFirstOccurrenceOf (" ", false, false).upToLastOccurrenceOf (" ", false, false)); }
-            if (! bad) pendingSlots->addChildElement (new XmlElement (*e));
-        }
-        if (skippedNames.size() > 0)
-            scanReport = "THE PROGRAM CLOSED AT START WITH " + skippedNames.joinIntoString (", ").toUpperCase() + " - TAKEN OUT OF ITS SLOT";
-        if (skipAll) scanReport = "STARTED WITH SHIFT HELD - NO EFFECTS LOADED";
-        if (pendingSlots->getNumChildElements() == 0) pendingSlots.reset();
+        for (auto& line : pedal)
+            if (line.endsWith (" LOADING"))
+                scanReport = "THE PROGRAM CLOSED WHILE OPENING " + line.fromFirstOccurrenceOf (" ", false, false)
+                                                                    .upToLastOccurrenceOf (" ", false, false).toUpperCase()
+                             + " - TAKE IT OUT OF THE MODULE IF IT HAPPENS AGAIN";
     }
 
     if (searchPath.getNumPaths() == 0)
@@ -539,7 +563,9 @@ void FxHost::restorePendingSlots()
         const String line = String (c) + "/" + String (i) + " " + desc.name;
         restorePedal.appendText (line + " LOADING\n");
 
-        if (loadSlot (c, i, desc).isEmpty())
+        const bool opened = loadSlot (c, i, desc).isEmpty();
+        if (! opened) missingEffects.addIfNotAlreadyThere (desc.name);
+        if (opened)
         {
             auto& s = slots[(size_t) c][(size_t) i];
             if (auto* st = e->getChildByName ("STATE"))

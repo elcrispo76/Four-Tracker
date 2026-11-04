@@ -1393,8 +1393,12 @@ int main (int argc, char** argv)
                     host->setBypass (0, 0, false);
                 }
 
-                // settings file: a new FX host restores the slot after prepare
+                // a restart: the program starts with the demo song and NO effects (they belong to the module);
+                // the folders and the scanned list are remembered, and loading the saved module brings the effects back
+                const auto restartModule = File::getSpecialLocation (File::tempDirectory).getChildFile ("ft-restart-fx.ftm");
+                CHECK (pf->saveModule (restartModule), "FX build: the song with its effects saves as a module");
                 host->saveSettings();
+                const auto pathsBefore = host->getSearchPath().toString();
                 ef.requestStop();
                 rf.run (2);
                 pf.reset();
@@ -1402,11 +1406,21 @@ int main (int argc, char** argv)
                 auto pf2 = std::make_unique<FourTrackerProcessor>();
                 AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
                 pf2->prepareToPlay (44100.0, 256);
-                for (int i = 0; i < 20 && ! pf2->getFxHost()->hasPlugin (0, 0); ++i) MessageManager::getInstance()->runDispatchLoopUntil (50);
+                for (int i = 0; i < 10; ++i) MessageManager::getInstance()->runDispatchLoopUntil (50);
+                {
+                    bool anyFx = false;
+                    for (int c = 0; c < FxHost::kNumFxChannels; ++c)
+                        for (int i = 0; i < FxHost::kSlotsPerChannel; ++i) anyFx = anyFx || pf2->getFxHost()->hasPlugin (c, i);
+                    CHECK (! anyFx && pf2->getFxHost()->getRoute (1) == -1, "FX build: after a restart the demo song starts without the effects from before");
+                    CHECK (pf2->getFxHost()->getSearchPath().toString() == pathsBefore && pf2->getFxHost()->getEffects().size() >= 0,
+                           "FX build: the plugin folders are remembered after a restart");
+                }
+                CHECK (pf2->loadModule (restartModule).isEmpty(), "FX build: the saved module loads after a restart");
+                restartModule.deleteFile();
                 CHECK (pf2->getFxHost()->hasPlugin (FxHost::kMaster, 0) && pf2->getFxHost()->isBypassed (FxHost::kMaster, 0),
-                       "FX build: the MASTER effect (bypassed) is remembered after a restart");
+                       "FX build: the module brings its MASTER effect (bypassed) back");
                 CHECK (pf2->getFxHost()->hasPlugin (0, 0) && pf2->getFxHost()->getSlotName (0, 0) == found[0]->name,
-                       "FX build: CH1 FX1 is restored after a restart");
+                       "FX build: the module brings CH1 FX1 back");
 
                 if (screens)
                 {
@@ -1493,6 +1507,77 @@ int main (int argc, char** argv)
                     h->setRoute (5, 0); h->setRoute (3, 6);
                     pf2->setNumChannels (4);
                     CHECK (h->getRoute (5) == -1 && h->getRoute (3) == -1, "FX chaining: removing tracks removes their chaining");
+                }
+                // the effects belong to the module: saved with it, and loading another module (or the demo) replaces them
+                {
+                    auto* h = pf2->getFxHost();
+                    const auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("ft-fx-modules");
+                    dir.deleteRecursively(); dir.createDirectory();
+                    const auto withFx = dir.getChildFile ("with fx.ftm"), noFx = dir.getChildFile ("no fx.ftm");
+                    h->setRoute (2, 1);
+                    const auto name00 = h->getSlotName (0, 0);
+                    const bool masterOn = h->hasPlugin (FxHost::kMaster, 0);
+                    CHECK (pf2->saveModule (withFx), "FX modules: a module with effects saves");
+                    pf2->loadDemoSong();
+                    CHECK (! h->hasPlugin (0, 0) && ! h->hasPlugin (FxHost::kMaster, 0) && h->getRoute (2) == -1,
+                           "FX modules: the demo song clears the effects and the chaining");
+                    CHECK (pf2->saveModule (noFx), "FX modules: a module without effects saves");
+                    CHECK (pf2->loadModule (withFx).isEmpty() && pf2->takeLoadNote().isEmpty(), "FX modules: the module with effects loads");
+                    CHECK (h->hasPlugin (0, 0) && h->getSlotName (0, 0) == name00 && h->hasPlugin (FxHost::kMaster, 0) == masterOn
+                             && (! masterOn || h->isBypassed (FxHost::kMaster, 0)) && h->getRoute (2) == 1,
+                           "FX modules: loading it brings its effects, master bypass and chaining back");
+                    CHECK (pf2->loadModule (noFx).isEmpty(), "FX modules: the module without effects loads");
+                    CHECK (! h->hasPlugin (0, 0) && ! h->hasPlugin (FxHost::kMaster, 0) && h->getRoute (2) == -1,
+                           "FX modules: loading another module removes the effects from before");
+                    // the effect's own settings (knobs) come back too: the Breakbeat Processor, its first parameters changed
+                    if (auto* bbPath = std::getenv ("FT_BREAKBEAT_VST3"))
+                    {
+                        OwnedArray<PluginDescription> bbF; KnownPluginList bbl; AudioPluginFormatManager fm2; fm2.addDefaultFormats();
+                        for (auto* f : fm2.getFormats())
+                            if (f->fileMightContainThisPluginType (bbPath)) bbl.scanAndAddFile (bbPath, true, bbF, *f);
+                        pf2->loadModule (withFx);
+                        if (bbF.size() == 1 && h->loadSlot (1, 2, *bbF[0]).isEmpty())
+                        {
+                            auto* inst = h->getInstance (1, 2);
+                            auto params = inst->getParameters();
+                            std::vector<float> want;
+                            for (int i = 0; i < jmin (6, params.size()); ++i)
+                            {
+                                params[i]->setValueNotifyingHost (i % 2 == 0 ? 2.0f / 7.0f : 5.0f / 7.0f);
+                                want.push_back (params[i]->getValue());
+                            }
+                            h->setBypass (1, 2, true);
+                            CHECK (pf2->saveModule (withFx), "FX modules: saved with the Breakbeat Processor");
+                            pf2->loadModule (noFx);
+                            CHECK (! h->hasPlugin (1, 2), "FX modules: another module clears it");
+                            pf2->loadModule (withFx);
+                            auto* back = h->getInstance (1, 2);
+                            bool same = back != nullptr;
+                            String got;
+                            if (back != nullptr)
+                                for (int i = 0; i < (int) want.size(); ++i)
+                                {
+                                    const float v = back->getParameters()[i]->getValue();
+                                    got << String (v, 2) << " ";
+                                    same = same && std::abs (v - want[(size_t) i]) < 0.02f;
+                                }
+                            CHECK (same && h->isBypassed (1, 2), "FX modules: the effect's knob settings and OFF come back with the module (" + got + ")");
+                            h->clearSlot (1, 2);
+                            pf2->saveModule (withFx);
+                        }
+                    }
+                    // an effect that isn't installed on this computer
+                    pf2->loadModule (withFx);
+                    auto x = h->createSongXml();
+                    if (x != nullptr)
+                        for (auto* e : x->getChildWithTagNameIterator ("SLOT"))
+                            for (auto* d : e->getChildIterator())
+                                if (d->hasTagName ("PLUGIN")) { d->setAttribute ("file", dir.getChildFile ("Gone.vst3").getFullPathName()); d->setAttribute ("name", "Gone FX"); d->setAttribute ("uniqueId", "1234"); d->setAttribute ("uid", "1234"); }
+                    const int missing = h->loadSongXml (x.get());
+                    CHECK (missing >= 1 && h->getMissingEffects().contains ("Gone FX") && ! h->hasPlugin (0, 0),
+                           "FX modules: an effect that isn't installed is reported, the rest loads");
+                    pf2->loadModule (withFx);
+                    dir.deleteRecursively();
                 }
                 pf2->clearAllEffects();
                 CHECK (! pf2->getFxHost()->hasPlugin (0, 0) && ! pf2->getFxHost()->hasPlugin (FxHost::kMaster, 0), "FX build: NEW MODULE / Empty removes the effects (master too)");

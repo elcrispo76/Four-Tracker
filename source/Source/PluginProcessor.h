@@ -134,6 +134,8 @@ public:
     FxHost* getFxHost() const noexcept;
     /** Removes the VST effects from every channel (FX build; does nothing otherwise). */
     void clearAllEffects();
+    /** After loadModule: a note for the title bar, e.g. effects in the module that aren't installed (empty = none). */
+    juce::String takeLoadNote() { auto n = lastLoadNote; lastLoadNote = {}; return n; }
 
     /** Number of tracks (channels) in the song, 1..16 (+ / - TRACK). Fewer clears the ones beyond. */
     void setNumChannels (int n);
@@ -147,6 +149,7 @@ public:
     bool hasUnsavedChanges() const;
     /** The module file last saved or loaded (empty after NEW). */
     juce::File currentModuleFile;
+    juce::String lastLoadNote;
 
     /** REC: records what you hear while you jam (see JamRecorder). */
     JamRecorder& getRecorder() noexcept { return recorder; }
