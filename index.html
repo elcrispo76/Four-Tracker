@@ -252,6 +252,18 @@ section { padding-block: 44px; }
 .news .keys-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 @media (max-width: 760px) { .news { grid-template-columns: minmax(0, 1fr); } }
 
+/* ---------- course ---------- */
+.course { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 16px; align-items: start; }
+.course-h { font-family: var(--f-display); font-weight: 700; font-size: 1rem; letter-spacing: 0.03em; margin-bottom: 10px; }
+.course-h .dim { color: var(--ink-soft); font-weight: 400; margin-left: 8px; }
+.lessons { padding: 16px; }
+.lessons ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.chap { width: 100%; text-align: left; font: inherit; font-size: 0.92rem; background: none; border: 0; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--ink); display: flex; gap: 8px; align-items: baseline; }
+.chap:hover, .chap:focus-visible { background: var(--panel-hi); outline: none; }
+.chap b { font-family: var(--f-display); font-weight: 400; font-size: 0.78rem; color: var(--red); }
+.chap .cell { min-width: 4.2ch; text-align: right; }
+@media (max-width: 900px) { .course { grid-template-columns: minmax(0, 1fr); } }
+
 /* ---------- video ---------- */
 .video-box { padding: 14px; }
 .yt { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border: 2px solid #2a2c30; border-radius: 6px;
@@ -331,6 +343,7 @@ footer .wrap { display: grid; gap: 8px; }
   <div class="wrap">
     <a class="brand" href="#top"><img src="images/icon-256.png" alt="" width="40" height="40"><span>FOUR TRACKER</span></a>
     <nav class="nav" aria-label="Sections">
+      <a href="#course">COURSE</a>
       <a href="#video">VIDEO</a>
       <a href="#live">LIVE</a>
       <a href="#features">FEATURES</a>
@@ -384,6 +397,44 @@ footer .wrap { display: grid; gap: 8px; }
     </div>
   </section>
 
+  <section id="course">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>THE COURSE</h2>
+        <p>Learn Four Tracker from scratch, one short lesson at a time: from what a tracker is to a live jam with effects and a fade-out from the MIDI controller. Part 2 is on its way.</p>
+      </div>
+      <div class="course">
+        <div class="panel video-box">
+          <h3 class="course-h">PART 1 · LESSONS 1–13 <span class="dim">27:47</span></h3>
+          <button class="yt" type="button" data-id="y5MH7p6FNYA" data-title="Four Tracker – The Course, Part 1" aria-label="Play the video: Four Tracker – The Course, Part 1">
+            <img src="images/course-part1.jpg" alt="Four Tracker course, part 1: the tracker screen with a caption from lesson 7" loading="lazy" width="1280" height="720">
+            <span class="play" aria-hidden="true"></span>
+          </button>
+          <p class="note">Plays from YouTube. <a href="https://www.youtube.com/watch?v=y5MH7p6FNYA">Watch it on YouTube</a></p>
+        </div>
+        <div class="panel lessons">
+          <h3 class="course-h">LESSONS</h3>
+          <ol>
+            <li><button type="button" class="chap" data-t="0"><span class="cell">0:00</span> <b>01</b> What is a tracker?</button></li>
+            <li><button type="button" class="chap" data-t="62"><span class="cell">1:02</span> <b>02</b> Getting started</button></li>
+            <li><button type="button" class="chap" data-t="90"><span class="cell">1:30</span> <b>03</b> Your first beat</button></li>
+            <li><button type="button" class="chap" data-t="154"><span class="cell">2:34</span> <b>04</b> Hi-hats, spacing and copy / paste</button></li>
+            <li><button type="button" class="chap" data-t="247"><span class="cell">4:07</span> <b>05</b> A synth bass with SYNTH 1</button></li>
+            <li><button type="button" class="chap" data-t="371"><span class="cell">6:11</span> <b>06</b> Your MIDI controller</button></li>
+            <li><button type="button" class="chap" data-t="472"><span class="cell">7:52</span> <b>07</b> SYNTH 2 and its effects</button></li>
+            <li><button type="button" class="chap" data-t="617"><span class="cell">10:17</span> <b>08</b> More tracks: shaker and clap</button></li>
+            <li><button type="button" class="chap" data-t="789"><span class="cell">13:09</span> <b>09</b> VST effects and chaining</button></li>
+            <li><button type="button" class="chap" data-t="954"><span class="cell">15:54</span> <b>10</b> Mix, dynamics and the master</button></li>
+            <li><button type="button" class="chap" data-t="1160"><span class="cell">19:20</span> <b>11</b> Patterns and blocks</button></li>
+            <li><button type="button" class="chap" data-t="1354"><span class="cell">22:34</span> <b>12</b> Slides, copy track and transpose</button></li>
+            <li><button type="button" class="chap" data-t="1490"><span class="cell">24:50</span> <b>13</b> Ring mod, flanger and a mini jam</button></li>
+          </ol>
+          <p class="note">Click a lesson to jump straight to it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="video">
     <div class="wrap">
       <div class="section-head">
@@ -391,7 +442,7 @@ footer .wrap { display: grid; gap: 8px; }
         <p>A live jam: patterns switched from an Arturia BeatStep and the computer keyboard, filters on the BeatStep knobs, and the sound recorded straight from Four Tracker with REC (F3).</p>
       </div>
       <div class="panel video-box">
-        <button class="yt" type="button" data-id="Wf6AmIc4h60" aria-label="Play the video: Four Tracker live jam">
+        <button class="yt" type="button" data-id="Wf6AmIc4h60" data-title="Four Tracker live jam" aria-label="Play the video: Four Tracker live jam">
           <img src="images/video-jam.jpg" alt="Four Tracker live jam: the tracker screen with a camera on the Arturia BeatStep" loading="lazy" width="1280" height="720">
           <span class="play" aria-hidden="true"></span>
         </button>
@@ -770,16 +821,30 @@ const SITE = {
 </script>
 
 <script>
-// the YouTube player is only loaded when the video is clicked (faster page, no YouTube cookies before that)
-document.querySelectorAll('.yt').forEach(function (b) {
-  b.addEventListener('click', function () {
-    var f = document.createElement('iframe');
-    f.src = 'https://www.youtube-nocookie.com/embed/' + b.dataset.id + '?autoplay=1&rel=0';
-    f.title = 'Four Tracker live jam';
-    f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-    f.allowFullscreen = true;
-    b.replaceWith(Object.assign(document.createElement('div'), { className: 'yt' }));
-    document.querySelector('.video-box .yt').appendChild(f);
+// the YouTube player is only loaded when a video is clicked (faster page, no YouTube cookies before that)
+function ftPlay(b, start) {
+  var f = document.createElement('iframe');
+  f.src = 'https://www.youtube-nocookie.com/embed/' + b.dataset.id + '?autoplay=1&rel=0' + (start ? '&start=' + start : '');
+  f.title = b.dataset.title || 'Four Tracker video';
+  f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  f.allowFullscreen = true;
+  var box = document.createElement('div');
+  box.className = 'yt';
+  box.dataset.id = b.dataset.id; box.dataset.title = b.dataset.title || '';
+  box.appendChild(f);
+  b.replaceWith(box);
+  return box;
+}
+document.querySelectorAll('button.yt').forEach(function (b) {
+  b.addEventListener('click', function () { ftPlay(b, 0); });
+});
+// lesson list: jump to the lesson in the course video
+document.querySelectorAll('.chap').forEach(function (c) {
+  c.addEventListener('click', function () {
+    var v = document.querySelector('#course .yt');
+    ftPlay(v, parseInt(c.dataset.t, 10));
+    v = document.querySelector('#course .yt');
+    if (v.getBoundingClientRect().top < 0) v.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 });
 </script>
