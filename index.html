@@ -254,6 +254,7 @@ section { padding-block: 44px; }
 
 /* ---------- course ---------- */
 .course { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 16px; align-items: start; }
+.course-2 { margin-top: 24px; }
 .course-h { font-family: var(--f-display); font-weight: 700; font-size: 1rem; letter-spacing: 0.03em; margin-bottom: 10px; }
 .course-h .dim { color: var(--ink-soft); font-weight: 400; margin-left: 8px; }
 .lessons { padding: 16px; }
@@ -401,7 +402,7 @@ footer .wrap { display: grid; gap: 8px; }
     <div class="wrap">
       <div class="section-head">
         <h2>THE COURSE</h2>
-        <p>Learn Four Tracker from scratch, one short lesson at a time: from what a tracker is to a live jam with effects and a fade-out from the MIDI controller. Part 2 is on its way.</p>
+        <p>Learn Four Tracker from scratch, one short lesson at a time: from what a tracker is to a live jam with effects and a fade-out from the MIDI controller. Part 2 goes deeper: re-sampling, chopping beats with the offset calculator, the loops folder and the Breakbeat Processor.</p>
       </div>
       <div class="course">
         <div class="panel video-box">
@@ -430,6 +431,28 @@ footer .wrap { display: grid; gap: 8px; }
             <li><button type="button" class="chap" data-t="1490"><span class="cell">24:50</span> <b>13</b> Ring mod, flanger and a mini jam</button></li>
           </ol>
           <p class="note">Click a lesson to jump straight to it.</p>
+        </div>
+      </div>
+      <div class="course course-2">
+        <div class="panel video-box">
+          <h3 class="course-h">PART 2 · LESSONS 14–19 <span class="dim">15:20</span></h3>
+          <button class="yt" type="button" data-id="ob8aPIDvKRs" data-title="Four Tracker – The Course, Part 2" aria-label="Play the video: Four Tracker – The Course, Part 2">
+            <img src="images/course-part2.jpg" alt="Four Tracker course, part 2: the offset calculator on Sample Edit" loading="lazy" width="1280" height="720">
+            <span class="play" aria-hidden="true"></span>
+          </button>
+          <p class="note">Plays from YouTube. <a href="https://www.youtube.com/watch?v=ob8aPIDvKRs">Watch it on YouTube</a></p>
+        </div>
+        <div class="panel lessons">
+          <h3 class="course-h">LESSONS</h3>
+          <ol start="14">
+            <li><button type="button" class="chap" data-t="0"><span class="cell">0:00</span> <b>14</b> Save a pattern, make a loop, save it</button></li>
+            <li><button type="button" class="chap" data-t="157"><span class="cell">2:37</span> <b>15</b> Cut a sound out of a loop</button></li>
+            <li><button type="button" class="chap" data-t="287"><span class="cell">4:47</span> <b>16</b> The offset calculator</button></li>
+            <li><button type="button" class="chap" data-t="473"><span class="cell">7:53</span> <b>17</b> Snares, offsets and the Breakbeat Processor</button></li>
+            <li><button type="button" class="chap" data-t="605"><span class="cell">10:05</span> <b>18</b> DnB tempo, loops and WRITE AT CURSOR</button></li>
+            <li><button type="button" class="chap" data-t="794"><span class="cell">13:14</span> <b>19</b> More from the loops folder</button></li>
+          </ol>
+          <p class="note">New in v0.5.5: the offset calculator, SAVE and the loops folder.</p>
         </div>
       </div>
     </div>
@@ -841,9 +864,10 @@ document.querySelectorAll('button.yt').forEach(function (b) {
 // lesson list: jump to the lesson in the course video
 document.querySelectorAll('.chap').forEach(function (c) {
   c.addEventListener('click', function () {
-    var v = document.querySelector('#course .yt');
+    var course = c.closest('.course');
+    var v = course.querySelector('.yt');
     ftPlay(v, parseInt(c.dataset.t, 10));
-    v = document.querySelector('#course .yt');
+    v = course.querySelector('.yt');
     if (v.getBoundingClientRect().top < 0) v.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 });
