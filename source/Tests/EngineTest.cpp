@@ -977,6 +977,118 @@ int main (int argc, char** argv)
             for (int i = ft::kNumInstruments - 1; i >= 1 && emptySlot < 0; --i) if (pb->getInstrument (i).isEmpty()) emptySlot = i;
             auto* sep = dynamic_cast<SampleEditPage*> (findC (*edb, [] (Component& c) { return dynamic_cast<SampleEditPage*> (&c) != nullptr; }));
             CHECK (sep != nullptr && emptySlot > 0, "RE-SAMPLE: Sample Edit page and an empty slot (" + String (emptySlot) + ")");
+
+            // OFFSET CALCULATOR: 09xx codes for a beat in 4 - 64 steps, on the waveform, written at the cursor
+            CHECK (OffsetCalculator::codeFor (1, 16, 264600) == 0x41 && OffsetCalculator::codeFor (3, 16, 264600) == 0xc2
+                   && OffsetCalculator::codeFor (4, 16, 264600) == -1 && OffsetCalculator::codeFor (0, 16, 264600) == 0
+                   && OffsetCalculator::codeFor (15, 16, 65536) == 0xf0 && OffsetCalculator::codeFor (8, 16, 65536) == 0x80,
+                   "OFFSET: 09xx codes (one step of 264600 / 16 = 0941, step 5 is past 09FF, 65536 frames: step 16 = 09F0)");
+            if (sep != nullptr)
+            {
+                // a one bar beat of 16 steps that 09FF reaches: 16 x 4000 frames
+                {
+                    AudioBuffer<float> beat (1, 64000);
+                    for (int i = 0; i < beat.getNumSamples(); ++i)
+                        beat.setSample (0, i, (i % 4000) < 600 ? std::sin (i * 0.3f) * (1.0f - (i % 4000) / 600.0f) : 0.0f);
+                    File wav = outDir.getChildFile ("offset_beat.wav");
+                    wav.deleteFile();
+                    if (auto os = wav.createOutputStream())
+                    {
+                        WavAudioFormat wf;
+                        std::unique_ptr<AudioFormatWriter> wr (wf.createWriterFor (os.release(), 44100.0, 1, 16, {}, 0));
+                        if (wr) wr->writeFromAudioSampleBuffer (beat, 0, beat.getNumSamples());
+                    }
+                    CHECK (pb->loadInstrument (5, wav).isEmpty(), "OFFSET: test beat loads");
+                }
+                pb->selectedInstrument = 5;
+                sep->instrumentsChanged();
+                auto* ob = dynamic_cast<Button*> (findC (*sep, [] (Component& c) { return c.getComponentID() == "offset"; }));
+                CHECK (ob != nullptr, "OFFSET button on Sample Edit");
+                if (ob) ob->triggerClick();
+                MessageManager::getInstance()->runDispatchLoopUntil (40);
+                CHECK (sep->offsets.isVisible() && sep->offsets.getSteps() == 16, "OFFSET opens with 16 steps");
+                sep->offsets.select (4, true);
+                MessageManager::getInstance()->runDispatchLoopUntil (60);
+                if (screens)
+                {
+                    auto img = edb->createComponentSnapshot (edb->getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("24_offset_calculator.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                }
+                const int pat = eb.selectedPattern.load();
+                const auto before = eb.getPattern (pat).at (0, 0);
+                sep->offsets.writeAtCursor();
+                const auto c = eb.getPattern (pat).at (0, 0);
+                const auto& bp = pb->getInstrument (5).params;
+                const int blen = bp.end - bp.start + 1, want = OffsetCalculator::codeFor (4, 16, blen);
+                CHECK (blen > 63000 && (want == 0x3e || want == 0x3f) && c.note == ft::kNativeNote && c.inst == 5 && c.fx == 0x09 && c.param == want
+                       && sep->offsets.getSelected() == 5,
+                       "OFFSET: WRITE puts C-4 05 09" + String::toHexString (want) + " at the cursor and moves on to step 6 (length " + String (blen) + ")");
+                {
+                    const ScopedLock sl (eb.getDataLock());
+                    eb.getPattern (pat).at (0, 0) = before;
+                }
+                {
+                    // (Xvfb has no window manager for a real window: check what the window shows)
+                    CHECK (findC (sep->offsets, [] (Component& c) { return c.getComponentID() == "offsetPop"; }) != nullptr, "OFFSET: POP OUT button");
+                    auto chartOwner = sep->offsets.makeChart();
+                    auto* chart = chartOwner.get();
+                    CHECK (chart != nullptr && chart->steps == 16 && chart->codes.size() == 16 && chart->codes[1] == OffsetCalculator::codeFor (1, 16, blen),
+                           "OFFSET: POP OUT shows the codes in a window of their own");
+                    if (chart != nullptr && screens)
+                    {
+                        auto img = chart->createComponentSnapshot (chart->getLocalBounds(), true, 2.0f);
+                        auto file = outDir.getChildFile ("26_offset_chart.png");
+                        file.deleteFile();
+                        FileOutputStream fos (file);
+                        PNGImageFormat().writeImageToStream (img, fos);
+                    }
+                }
+                sep->offsets.setSteps (32);
+                CHECK (OffsetCalculator::codeFor (31, 32, 64000) == 0xf2, "OFFSET: 32 steps");
+                sep->offsets.setSteps (64);
+                MessageManager::getInstance()->runDispatchLoopUntil (30);
+                if (screens)
+                {
+                    auto img = edb->createComponentSnapshot (edb->getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("25_offset_64_steps.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                }
+                sep->offsets.close();
+                CHECK (! sep->offsets.isVisible(), "OFFSET closes");
+                // SAVE: the slot's sample (e.g. a MIX or RE-SAMPLE) as WAV with its loop, or AIFF
+                {
+                    CHECK (findC (*sep, [] (Component& c) { return c.getComponentID() == "saveSample"; }) != nullptr, "SAVE button on Sample Edit");
+                    auto& src = pb->getInstrument (5);
+                    src.params.loop = true; src.params.loopStart = 4000; src.params.loopEnd = 35999;
+                    pb->instrumentChanged (5);
+                    const auto wavF = outDir.getChildFile ("saved sample.wav"), aifF = outDir.getChildFile ("saved sample.aif");
+                    wavF.deleteFile(); aifF.deleteFile();
+                    const auto e1 = pb->saveInstrumentSample (5, wavF);
+                    CHECK (e1.isEmpty() && wavF.existsAsFile() && src.name == "SAVED SAMPLE.WAV", "SAVE writes a WAV and the slot takes its name " + e1);
+                    const auto e2 = pb->saveInstrumentSample (5, aifF);
+                    CHECK (e2.isEmpty() && aifF.existsAsFile(), "SAVE writes an AIFF " + e2);
+                    int freeSlot = -1;
+                    for (int i = ft::kNumInstruments - 1; i >= 1 && freeSlot < 0; --i) if (pb->getInstrument (i).isEmpty()) freeSlot = i;
+                    if (freeSlot > 0)
+                    {
+                        CHECK (pb->loadInstrument (freeSlot, wavF).isEmpty(), "saved WAV loads again");
+                        const auto& back = pb->getInstrument (freeSlot);
+                        float diff = 0.0f;
+                        for (int i = 0; i < 64000; i += 97) diff = jmax (diff, std::abs (back.data->buffer.getSample (0, i) - src.data->buffer.getSample (0, i)));
+                        CHECK (back.data->getLength() == 64000 && back.params.loop && back.params.loopStart == 4000 && back.params.loopEnd == 35999 && diff < 0.001f,
+                               "saved WAV: same sound, loop points kept (" + String (back.params.loopStart) + " - " + String (back.params.loopEnd) + ")");
+                        CHECK (pb->loadInstrument (freeSlot, aifF).isEmpty() && pb->getInstrument (freeSlot).data->getLength() == 64000, "saved AIFF loads again");
+                        pb->discardInstrument (freeSlot);
+                    }
+                    CHECK (pb->saveInstrumentSample (freeSlot > 0 ? freeSlot : 60, outDir.getChildFile ("x.wav")).isNotEmpty(), "SAVE on an empty slot says so");
+                }
+                pb->selectedInstrument = 4;
+            }
             if (sep != nullptr && emptySlot > 0)
             {
                 pb->selectedInstrument = emptySlot;

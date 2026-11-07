@@ -1479,17 +1479,392 @@ void ResampleDialog::resized()
 }
 
 // ===========================================================================
+// OffsetCalculator
+// ===========================================================================
+
+namespace
+{
+    constexpr int kOffsetSteps[] = { 4, 8, 16, 32, 64 };
+    const Colour kOffsetWarn { 0xffd9342b };
+}
+
+OffsetCalculator::OffsetCalculator (EditorState& s, WaveformView& w) : st (s), wave (w)
+{
+    for (size_t i = 0; i < stepButtons.size(); ++i)
+    {
+        auto b = std::make_unique<PixelButton> (String (kOffsetSteps[i]), PixelButton::Style::Segment, 18.0f);
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (7302);
+        b->setComponentID ("steps" + String (kOffsetSteps[i]));
+        const int n = kOffsetSteps[i];
+        b->onClick = [this, n] { setSteps (n); };
+        addAndMakeVisible (*b);
+        stepButtons[i] = std::move (b);
+    }
+    for (auto* c : { &playBtn, &writeBtn, &closeBtn, &popBtn }) addAndMakeVisible (c);
+    popBtn.setComponentID ("offsetPop");
+    popBtn.onClick = [this] { popOut(); };
+    writeBtn.setComponentID ("offsetWrite");
+    playBtn.onClick = [this] { select (selected, true); };
+    writeBtn.onClick = [this] { writeAtCursor(); };
+    closeBtn.onClick = [this] { close(); };
+    setSteps (16);
+    setVisible (false);
+}
+
+int OffsetCalculator::codeFor (int step, int numSteps, int len)
+{
+    if (numSteps <= 0 || len <= 0) return 0;
+    const double frames = (double) step * len / numSteps;
+    const int code = roundToInt (frames / 256.0);
+    return code > 255 ? -1 : code;
+}
+
+int OffsetCalculator::length() const
+{
+    const auto& in = st.proc.getInstrument (st.proc.selectedInstrument);
+    if (in.isEmpty() || in.isSynth() || in.isSynth2()) return 0;
+    return jmax (0, jmin (in.params.end, in.data->getLength() - 1) - in.params.start + 1);
+}
+
+void OffsetCalculator::open()
+{
+    selected = 0;
+    wave.zoomFit();                 // every step in view
+    sampleChanged();
+    setVisible (true);
+    toFront (false);
+    st.setStatus ("OFFSET: CLICK A STEP TO HEAR IT - ENTER WRITES IT AT THE CURSOR");
+    st.changed();
+}
+
+void OffsetCalculator::close()
+{
+    if (! isVisible()) return;
+    setVisible (false);
+    wave.setGrid ({}, -1);
+    st.engine().requestStopPreview();
+    if (onClose) onClose();
+    st.changed();
+}
+
+void OffsetCalculator::setSteps (int n)
+{
+    steps = jlimit (1, 64, n);
+    for (size_t i = 0; i < stepButtons.size(); ++i)
+        stepButtons[i]->setToggleState (kOffsetSteps[i] == steps, dontSendNotification);
+    selected = jmin (selected, steps - 1);
+    resized();
+    updateGrid();
+    repaint();
+}
+
+void OffsetCalculator::sampleChanged()
+{
+    updateGrid();
+    repaint();
+}
+
+void OffsetCalculator::updateGrid()
+{
+    if (! isVisible() && ! isShowing()) { /* still keep the grid for open() */ }
+    const int len = length();
+    if (len <= 0) { wave.setGrid ({}, -1); return; }
+    const auto& p = st.proc.getInstrument (st.proc.selectedInstrument).params;
+    std::vector<int> frames;
+    for (int i = 0; i < steps; ++i)
+    {
+        const int v = (int) ((double) i * len / steps);
+        frames.push_back (p.reverse ? p.end - v : p.start + v);
+    }
+    wave.setGrid (std::move (frames), selected);
+}
+
+void OffsetCalculator::select (int step, bool play)
+{
+    selected = jlimit (0, steps - 1, step);
+    updateGrid();
+    repaint();
+    const int len = length();
+    if (! play || len <= 0) return;
+    const int code = codeFor (selected, steps, len);
+    const int at = code < 0 ? (int) ((double) selected * len / steps) : code * 256;
+    st.engine().requestPreviewAt (st.proc.selectedInstrument, kNativeNote, at);
+    st.setStatus (code < 0 ? "STEP " + String (selected + 1) + ": 09FF CAN'T REACH THIS FAR"
+                           : "STEP " + String (selected + 1) + (selected == 0 ? ": THE START (NO 09 NEEDED)" : ": 09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase()));
+    st.changed();
+}
+
+void OffsetCalculator::writeAtCursor()
+{
+    const int len = length();
+    if (len <= 0) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+    const int code = codeFor (selected, steps, len);
+    if (code < 0) { st.setStatus ("STEP " + String (selected + 1) + " IS PAST 09FF - CUT THE SAMPLE SHORTER"); st.changed(); return; }
+
+    const int pat = st.viewPattern();
+    auto& pattern = st.engine().getPattern (pat);
+    const int rows = jmax (1, pattern.getNumRows());
+    const int row = jlimit (0, rows - 1, st.cursorRow), ch = jlimit (0, st.numChannels() - 1, st.cursorCh);
+    st.pushUndo (pat);
+    {
+        const ScopedLock sl (st.engine().getDataLock());
+        auto& c = pattern.at (row, ch);
+        if (c.note == kNoteNone || c.note == kNoteOff) c.note = (uint8_t) kNativeNote;
+        c.inst = (uint8_t) st.proc.selectedInstrument;
+        if (selected == 0) { if (c.fx == 0x09) { c.fx = 0; c.param = 0; } }   // 0900 would repeat the last offset
+        else { c.fx = 0x09; c.param = (uint8_t) code; }
+    }
+    st.setStatus ("WROTE STEP " + String (selected + 1) + (selected == 0 ? String() : " (09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase() + ")")
+                  + " AT ROW " + formatNumber (row, 2, st.hex()) + " CH" + String (ch + 1));
+    st.cursorRow = (row + jmax (1, st.editStep)) % rows;
+    selected = (selected + 1) % steps;     // ready for the next slice
+    updateGrid();
+    repaint();
+    st.changed();
+}
+
+OffsetChart::OffsetChart (const String& t, int n, std::vector<int> c) : title (t), steps (n), codes (std::move (c))
+{
+    const int cols = columns(), rows = (steps + cols - 1) / cols;
+    setSize (24 + cols * 112, 58 + rows * 50 + 30);
+}
+
+void OffsetChart::paint (Graphics& g)
+{
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    auto fit = [&] (const String& t, Rectangle<float> r, float h, Colour c, Justification j, bool bold)
+    {
+        Theme::text (g, t, r, jmin (h, h * (r.getWidth() - 2.0f) / jmax (1.0f, PixelFont::getWidth (t, h))), c, j, bold);
+    };
+    fit (title, { 12.0f, 8.0f, (float) getWidth() - 24.0f, 22.0f }, 18.0f, Theme::ink, Justification::centredLeft, true);
+    fit (String (steps) + " STEPS - NOTE + SLOT + CODE ON THE ROW", { 12.0f, 30.0f, (float) getWidth() - 24.0f, 18.0f }, 13.0f,
+         Theme::ink.withAlpha (0.65f), Justification::centredLeft, false);
+    const int cols = columns();
+    for (int i = 0; i < steps; ++i)
+    {
+        const auto r = Rectangle<float> (12.0f + (i % cols) * 112.0f, 56.0f + (i / cols) * 50.0f, 108.0f, 46.0f);
+        const int code = i < (int) codes.size() ? codes[(size_t) i] : -1;
+        const bool beat = i % 4 == 0;     // the first step of each beat stands out
+        Theme::drawScreen (g, r);
+        fit (String (i + 1), r.withWidth (40.0f).withTrimmedLeft (7.0f), 15.0f, beat ? Theme::screenText : Theme::screenDim, Justification::centredLeft, beat);
+        const String txt = i == 0 ? "START" : code < 0 ? "--" : "09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase();
+        fit (txt, r.withTrimmedLeft (40.0f).withTrimmedRight (6.0f), 19.0f, code < 0 ? Colour (0xffd9342b) : Theme::screenText, Justification::centred, true);
+    }
+    fit ("STEP 1: NO 09 (0900 REPEATS THE LAST OFFSET)", { 12.0f, (float) getHeight() - 26.0f, (float) getWidth() - 24.0f, 18.0f }, 13.0f,
+         Theme::ink.withAlpha (0.65f), Justification::centredLeft, false);
+}
+
+namespace
+{
+    struct OffsetChartWindow : public DocumentWindow
+    {
+        OffsetChartWindow (const String& name, OwnedArray<DocumentWindow>& owner)
+            : DocumentWindow (name, Theme::panel, DocumentWindow::closeButton), list (owner) {}
+        void closeButtonPressed() override { list.removeObject (this); }   // deletes this window
+        OwnedArray<DocumentWindow>& list;
+    };
+}
+
+std::unique_ptr<OffsetChart> OffsetCalculator::makeChart() const
+{
+    const int len = length();
+    if (len <= 0) return {};
+    const int slotNo = st.proc.selectedInstrument;
+    std::vector<int> codes;
+    for (int i = 0; i < steps; ++i) codes.push_back (codeFor (i, steps, len));
+    return std::make_unique<OffsetChart> (formatNumber (slotNo, 2, st.hex()) + " " + st.proc.getInstrument (slotNo).name.toUpperCase(),
+                                          steps, std::move (codes));
+}
+
+void OffsetCalculator::popOut()
+{
+    auto chart = makeChart();
+    if (chart == nullptr) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+    const String title = chart->title;
+    auto* w = new OffsetChartWindow ("OFFSET " + title, chartWindows);
+    chartWindows.add (w);
+    w->setUsingNativeTitleBar (true);
+    w->setContentOwned (chart.release(), true);
+    w->setResizable (false, false);
+    w->setAlwaysOnTop (true);
+    if (auto* top = getTopLevelComponent())
+    {
+        const auto b = top->getScreenBounds();
+        w->setTopLeftPosition (jmax (0, b.getRight() - w->getWidth() - 40 - 30 * (chartWindows.size() - 1)), b.getY() + 120 + 30 * (chartWindows.size() - 1));
+    }
+    w->setVisible (true);
+    st.setStatus ("OFFSET CHART IN ITS OWN WINDOW - DRAG IT TO THE SIDE");
+    st.changed();
+}
+
+bool OffsetCalculator::handleKey (const KeyPress& k)
+{
+    if (! isVisible()) return false;
+    const int code = k.getKeyCode();
+    if (code == KeyPress::escapeKey) { close(); return true; }
+    if (code == KeyPress::returnKey) { writeAtCursor(); return true; }
+    if (code == KeyPress::spaceKey)  { select (selected, true); return true; }
+    const int cols = jmin (16, steps);
+    if (code == KeyPress::leftKey)  { select ((selected + steps - 1) % steps, true); return true; }
+    if (code == KeyPress::rightKey) { select ((selected + 1) % steps, true); return true; }
+    if (code == KeyPress::upKey)    { select ((selected + steps - cols) % steps, true); return true; }
+    if (code == KeyPress::downKey)  { select ((selected + cols) % steps, true); return true; }
+    return false;
+}
+
+Rectangle<int> OffsetCalculator::cellBounds (int i) const
+{
+    const int cols = jmin (16, steps), rowsN = (steps + cols - 1) / cols;
+    const int gap = 4;
+    const int cw = (gridArea.getWidth() - (cols - 1) * gap) / cols;
+    const int chh = (gridArea.getHeight() - (rowsN - 1) * gap) / rowsN;
+    return { gridArea.getX() + (i % cols) * (cw + gap), gridArea.getY() + (i / cols) * (chh + gap), cw, chh };
+}
+
+void OffsetCalculator::mouseDown (const MouseEvent& e)
+{
+    for (int i = 0; i < steps; ++i)
+        if (cellBounds (i).contains (e.getPosition())) { select (i, true); return; }
+}
+
+void OffsetCalculator::paint (Graphics& g)
+{
+    auto fit = [&] (const String& t, Rectangle<float> r, float h, Colour c, Justification j = Justification::centredLeft, bool bold = false)
+    {
+        Theme::text (g, t, r, jmin (h, h * (r.getWidth() - 2.0f) / jmax (1.0f, PixelFont::getWidth (t, h))), c, j, bold);
+    };
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    Theme::text (g, "OFFSET CALCULATOR", { 14.0f, 10.0f, 330.0f, 40.0f }, 24.0f, Theme::ink, Justification::centredLeft, true);
+    {
+        auto& b = *stepButtons[0];
+        fit ("STEPS", { (float) b.getX() - 84.0f, (float) b.getY(), 76.0f, (float) b.getHeight() }, 16.0f, Theme::ink, Justification::centredRight);
+    }
+
+    const int len = length();
+    if (len <= 0)
+    {
+        Theme::drawScreen (g, gridArea.toFloat());
+        fit ("LOAD A SAMPLE IN THIS SLOT (09 OFFSET WORKS ON SAMPLES, NOT ON THE SYNTHS)", gridArea.toFloat().reduced (10.0f, 0.0f), 17.0f,
+             Theme::screenText, Justification::centred);
+        return;
+    }
+
+    const int cols = jmin (16, steps), rowsN = (steps + cols - 1) / cols;
+    ignoreUnused (cols);
+    for (int i = 0; i < steps; ++i)
+    {
+        auto r = cellBounds (i).toFloat();
+        const int code = codeFor (i, steps, len);
+        const bool sel = i == selected, bad = code < 0;
+        Theme::drawRaised (g, r, sel ? Theme::buttonDark : (bad ? Colour (0xffb9a9a8) : Theme::buttonLight), sel);
+        const Colour ink = sel ? Theme::buttonDarkText : (bad ? kOffsetWarn : Theme::ink);
+        const String codeText = i == 0 ? "START" : (bad ? "--" : "09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase());
+        auto inner = r.reduced (3.0f, 0.0f);
+        if (r.getHeight() >= 54.0f)
+        {
+            fit (String (i + 1), inner.withHeight (r.getHeight() * 0.45f).withTrimmedBottom (2.0f), 15.0f, ink.withAlpha (0.7f), Justification::centredBottom);
+            fit (codeText, inner.withTrimmedTop (r.getHeight() * 0.45f).withTrimmedTop (3.0f).withHeight (24.0f), 19.0f, ink, Justification::centredTop, true);
+        }
+        else
+            fit (rowsN > 2 ? codeText : String (i + 1) + " " + codeText, inner, jmin (16.0f, r.getHeight() * 0.5f), ink, Justification::centred, true);
+    }
+
+    // the facts under the grid
+    const double stepFrames = (double) len / steps;
+    const auto& in = st.proc.getInstrument (st.proc.selectedInstrument);
+    const double secs = len / jmax (1.0, in.data->sampleRate);
+    const int bpm = jmax (1, st.engine().bpm.load());
+    const double stepsAtTempo = secs / (15.0 / bpm);          // 4 rows (steps) to a beat
+    const bool fits = std::abs (stepsAtTempo - steps) <= 0.25;
+    int unreachable = 0;
+    for (int i = 0; i < steps; ++i) if (codeFor (i, steps, len) < 0) ++unreachable;
+
+    const float tw = (float) playBtn.getX() - 28.0f, ty = (float) getHeight() - 76.0f;
+    fit ("1 STEP = " + String (roundToInt (stepFrames)) + " FRAMES (" + String (stepFrames / 256.0, 1) + " x 256)   16 STEPS = 1 BAR OF 4/4",
+         { 16.0f, ty, tw, 20.0f }, 15.0f, Theme::ink);
+    String tempo = "AT " + String (bpm) + " BPM THE SAMPLE IS " + String (stepsAtTempo, 1) + " STEPS";
+    if (! fits) tempo << " - BPM " << roundToInt (steps * 15.0 / secs) << " FITS " << steps << ", OR TUNE IT";
+    fit (tempo, { 16.0f, ty + 23.0f, tw, 20.0f }, 15.0f, fits ? Theme::ink.withAlpha (0.75f) : kOffsetWarn);
+    fit (unreachable > 0 ? String (unreachable) + " STEPS ARE PAST 09FF (65280 FRAMES): MAKE THE SAMPLE SHORTER"
+                         : String ("CLICK A STEP TO HEAR IT - ARROWS, SPACE PLAYS, ENTER WRITES"),
+         { 16.0f, ty + 46.0f, tw, 20.0f }, 14.0f, unreachable > 0 ? kOffsetWarn : Theme::ink.withAlpha (0.6f));
+}
+
+void OffsetCalculator::resized()
+{
+    const int w = getWidth(), h = getHeight();
+    const int sbw = 52;
+    closeBtn.setBounds (w - 124, 8, 112, 40);
+    popBtn.setBounds (closeBtn.getX() - 8 - 130, 8, 130, 40);
+    int sx = popBtn.getX() - 20 - (int) stepButtons.size() * (sbw + 4) + 4;
+    for (auto& b : stepButtons) { b->setBounds (sx, 8, sbw, 40); sx += sbw + 4; }
+    writeBtn.setBounds (w - 12 - 230, h - 58, 230, 46);
+    playBtn.setBounds (writeBtn.getX() - 8 - 150, h - 58, 150, 46);
+    gridArea = { 12, 56, w - 24, jmax (40, h - 56 - 86) };
+}
+
+// ===========================================================================
 // SampleEditPage
 // ===========================================================================
 
-SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s), resampler (s)
+SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s), resampler (s), offsets (s, wave)
 {
-    for (auto* c : std::initializer_list<Component*> { &list, &numberLabel, &name, &prev, &next, &lengthVal, &rateVal, &bitsVal, &chansVal,
+    for (auto* c : std::initializer_list<Component*> { &list, &numberLabel, &name, &prev, &next, &saveBtn, &lengthVal, &rateVal, &bitsVal, &chansVal,
                                                         &curPos, &wave, &startBox, &endBox, &loopStartBox, &loopEndBox, &setStart, &setEnd,
                                                         &setLoop, &playLoop, &loopMode, &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize,
-                                                        &reverseBtn, &mix, &resampleBtn, &zoomIn, &zoomOut, &fit, &left, &right })
+                                                        &reverseBtn, &mix, &resampleBtn, &offsetBtn, &zoomIn, &zoomOut, &fit, &left, &right })
         addAndMakeVisible (c);
     addChildComponent (resampler);
+    addChildComponent (offsets);
+    saveBtn.setComponentID ("saveSample");
+    saveBtn.icon = Theme::iconSave;
+    saveBtn.onClick = [this]
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (in.isEmpty() || in.isSynth() || in.isSynth2())
+        {
+            st.setStatus (in.isEmpty() ? "NO SAMPLE IN THIS SLOT" : "A SYNTH CAN'T BE SAVED AS A SAMPLE");
+            st.changed();
+            return;
+        }
+        auto dir = FourTrackerProcessor::getSavedSamplesFolder();
+        dir.createDirectory();
+        auto base = File::createLegalFileName (in.name.isNotEmpty() ? in.name : "SAMPLE " + hex2 (slot()));
+        auto suggested = dir.getChildFile (base);
+        if (! suggested.hasFileExtension ("wav;aif;aiff")) suggested = suggested.withFileExtension ("wav");
+        chooser = std::make_unique<FileChooser> ("Save sample " + formatNumber (slot(), 2, st.hex()) + " (WAV or AIFF)", suggested, "*.wav;*.aif;*.aiff");
+        const int s = slot();
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+            [this, s] (const FileChooser& fc)
+            {
+                const auto f = fc.getResult();
+                if (f == File()) return;
+                const auto err = st.proc.saveInstrumentSample (s, f);
+                st.setStatus (err.isEmpty() ? "SAVED " + st.proc.getInstrument (s).name : err);
+                instrumentsChanged();
+                st.changed();
+            });
+    };
+    offsetBtn.setComponentID ("offset");
+    offsetBtn.onClick = [this] { wave.setKeysActive (false); if (offsets.isVisible()) offsets.close(); else offsets.open(); };
+    offsetBtn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        // a beat cut in 4: step lines over a wave, the 3rd one marked
+        g.setColour (c);
+        auto b = r.reduced (r.getWidth() * 0.1f, r.getHeight() * 0.1f);
+        Path w;
+        for (int i = 0; i <= 32; ++i)
+        {
+            const float x = b.getX() + b.getWidth() * i / 32.0f;
+            const float env = 1.0f - (float) (i % 8) / 8.0f;
+            const float y = b.getCentreY() - std::sin (i * 1.9f) * b.getHeight() * 0.38f * env;
+            if (i == 0) w.startNewSubPath (x, y); else w.lineTo (x, y);
+        }
+        g.strokePath (w, PathStrokeType (1.6f));
+        for (int i = 0; i < 4; ++i)
+            g.fillRect (b.getX() + b.getWidth() * i / 4.0f - (i == 2 ? 1.25f : 0.5f), r.getY(), i == 2 ? 2.5f : 1.0f, r.getHeight());
+    };
     resampleBtn.setComponentID ("resample");
     resampleBtn.onClick = [this] { wave.setKeysActive (false); resampler.open(); };
     resampler.onDone = [this] { wave.clearSelection(); instrumentsChanged(); wave.zoomFit(); };
@@ -1719,7 +2094,7 @@ SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s), resampler (s
     right.onClick   = [this] { wave.scroll (1); };
 
     captions = { { &cut, "CUT" }, { &copy, "COPY" }, { &paste, "PASTE" }, { &fadeIn, "FADE IN" }, { &fadeOut, "FADE OUT" },
-                 { &normalize, "NORMALIZE" }, { &reverseBtn, "REVERSE" }, { &mix, "MIX" }, { &resampleBtn, "RE-SAMPLE" } };
+                 { &normalize, "NORMALIZE" }, { &reverseBtn, "REVERSE" }, { &mix, "MIX" }, { &resampleBtn, "RE-SAMPLE" }, { &offsetBtn, "OFFSET" } };
     for (auto& [b, t] : captions) b->setButtonText ({});
 
     instrumentsChanged();
@@ -1732,12 +2107,13 @@ void SampleEditPage::mouseDown (const MouseEvent&)
 
 void SampleEditPage::visibilityChanged()
 {
-    if (! isVisible()) wave.setKeysActive (false);
+    if (! isVisible()) { wave.setKeysActive (false); offsets.close(); }
 }
 
 bool SampleEditPage::handleKey (const KeyPress& k)
 {
     if (resampler.isVisible()) return resampler.handleKey (k);
+    if (offsets.isVisible() && offsets.handleKey (k)) return true;
     if (! wave.areKeysActive()) return false;
     const auto m = k.getModifiers();
     const int code = k.getKeyCode();
@@ -1817,6 +2193,7 @@ void SampleEditPage::instrumentsChanged()
 
     wave.setSample (in.data, &in.params);
     curPos.setValue (wave.getCursor());
+    if (offsets.isVisible()) offsets.sampleChanged();
     repaint();
 }
 
@@ -1873,7 +2250,8 @@ void SampleEditPage::resized()
 
     header = { x0, 0, w, 62 };
     numberLabel.setBounds (x0 + 290, 7, 70, 48);
-    name.setBounds (x0 + 372, 7, w - 372 - 170, 48);
+    name.setBounds (x0 + 372, 7, w - 372 - 170 - 148, 48);
+    saveBtn.setBounds (header.getRight() - 162 - 148, 7, 140, 48);
     prev.setBounds (header.getRight() - 162, 7, 74, 48);
     next.setBounds (header.getRight() - 82, 7, 74, 48);
 
@@ -1901,9 +2279,9 @@ void SampleEditPage::resized()
     editPanel = { x0, 552, 760, getHeight() - 552 };
     zoomPanel = { x0 + 768, 552, w - 768, getHeight() - 552 };
 
-    const int bw = 76, bh = 80;
-    PixelButton* eb[] = { &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize, &reverseBtn, &mix, &resampleBtn };
-    for (int i = 0; i < 9; ++i)
+    const int bw = 68, bh = 80;
+    PixelButton* eb[] = { &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize, &reverseBtn, &mix, &resampleBtn, &offsetBtn };
+    for (int i = 0; i < 10; ++i)
         eb[i]->setBounds (editPanel.getX() + 12 + i * (bw + 6), editPanel.getY() + 38, bw, bh);
 
     const int zx = zoomPanel.getX() + 12, zy = zoomPanel.getY() + 38;
@@ -1914,4 +2292,5 @@ void SampleEditPage::resized()
     right.setBounds (zx + 264, zy, 60, 66);
 
     resampler.setBounds (getLocalBounds().withTrimmedLeft (x0));
+    offsets.setBounds (x0, 412, w, getHeight() - 412);   // under the waveform, which stays in view
 }

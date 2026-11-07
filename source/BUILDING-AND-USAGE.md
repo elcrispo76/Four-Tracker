@@ -172,6 +172,17 @@ The effect numbers follow **FastTracker 2**. 00-0F are the classic ProTracker/MO
   - **MIX** (like OctaMED): pick another slot from the list, and its sample is mixed into this one from the cursor
     (or the start of the selection). It keeps its own pitch, can make the sample longer, turns it stereo if either
     is stereo, and is scaled down only if the result would clip,
+  - **SAVE** (next to the name): saves the slot's sample as a WAV or AIFF file (Documents/Four Tracker/Samples is
+    suggested), e.g. a MIX or a loop from RE-SAMPLE. 16 or 24 bit like the sample; a WAV keeps the loop points. The
+    slot takes the file's name.
+  - **OFFSET** (offset calculator, for beat loops and breakbeats): choose how many **STEPS** the sample holds
+    (4, 8, **16 = 1 bar of 4/4**, 32 or 64). The sample (START to END) is cut into equal steps, drawn as lines on
+    the waveform, and each step shows its **09xx** code. Click a step (or arrows, Space) to hear it from there;
+    **WRITE AT CURSOR** (Enter) puts C-4 + the slot + 09xx on the pattern row at the cursor and moves on to the
+    next step. Step 1 needs no 09 (0900 repeats the last offset). Steps past 09FF (65280 frames, about 1.5 s at
+    44.1 kHz) show "--". The info line says how long the sample is in steps at the song's BPM, and which BPM fits.
+    **POP OUT** opens the codes as a small chart in a window of its own that stays on top: drag it to the side and
+    keep it while you write the beat on the Tracks or Block page. Esc closes the calculator.
   - **RE-SAMPLE:** turns a pattern, or part of it, into a sample in the selected slot (pick an empty one). Choose the
     **PATTERN**, then **WHOLE PATTERN** or **ROWS** (FROM ROW / TO ROW), and **ALL TRACKS** or **CHOOSE TRACKS** (tick
     the tracks you want in the 16 squares). **USE BLOCK** takes the rows and tracks of the block marked in the pattern.
@@ -360,7 +371,7 @@ Never VST2.
 3. Double-click `dist-mac/FourTracker-<version>-mac.pkg`.
 
 No Mac? The GitHub repository has a workflow (`.github/workflows/build-mac.yml`) that builds the .pkg on GitHub's
-Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.4`, to add the .pkg to that release).
+Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.5`, to add the .pkg to that release).
 It also runs by itself when a release is published. The effects bundle has its own workflow
 (`build-mac-effects.yml`, "Mac build: effects bundle") that builds `FourTrackerEffects-Bundle-<version>-mac.pkg`
 from the `effects` folder.
@@ -375,10 +386,10 @@ Mac keyboards may need **fn** for the F-keys, and have no Insert key.
 1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
 2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
 3. Double-click `build-installer.bat` and pick:
-   - **1** personal: `dist\FourTracker-Setup-0.5.4-personal.exe` (with VST2 if built), for you
-   - **2** share: `dist\FourTracker-Setup-0.5.4-share.exe` (program + VST3 plugin)
-   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.4-personal-fx.exe` (VST3 + VST2 effects), for you
-   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.4-share-fx.exe` (VST3 effects, no VST2), fine to share
+   - **1** personal: `dist\FourTracker-Setup-0.5.5-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.5-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.5-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.5-share-fx.exe` (VST3 effects, no VST2), fine to share
 
 The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
 user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes

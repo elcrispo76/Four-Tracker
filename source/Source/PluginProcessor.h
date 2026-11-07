@@ -87,6 +87,12 @@ public:
     juce::String takeKnobMessage() { auto m = knobMessage; knobMessage = {}; return m; }
 
     juce::String loadInstrument (int slot, const juce::File& file);
+    /** Writes the slot's sample to a WAV or AIFF file (by the extension; WAV if none), 16 or 24 bit
+        like the sample, with the loop in the WAV 'smpl' chunk. The slot takes the file's name.
+        Returns an error message, or an empty string. */
+    juce::String saveInstrumentSample (int slot, const juce::File& file);
+    /** Documents/Four Tracker/Samples: where SAVE suggests saving. */
+    static juce::File getSavedSamplesFolder() { return getUserFolder().getChildFile ("Samples"); }
     void discardInstrument (int slot);
     juce::AudioFormatManager& getFormatManager() noexcept { return formats; }
     juce::String getSupportedAudioWildcard() const;

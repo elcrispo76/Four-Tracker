@@ -7,7 +7,7 @@
 ; ===========================================================================
 
 #define AppName      "Four Tracker"
-#define AppVersion   "0.5.4"
+#define AppVersion   "0.5.5"
 #define AppPublisher "Four Tracker"
 #define AppExe       "Four Tracker.exe"
 #define Root         AddBackslash(SourcePath) + "..\"
@@ -104,7 +104,7 @@ Name: "vst2_32"; Description: "VST2 plugin, 32-bit (for 32-bit hosts such as old
 #endif
 
 #if HasSamples
-Name: "samples"; Description: "Four Tracker Sample Pack (88 drum, bass and synth sounds, CC0) in Documents\Four Tracker\Samples"; Types: full app app32
+Name: "samples"; Description: "Four Tracker Sample Pack (88 sounds and 44 loops, CC0) in Documents\Four Tracker\Samples"; Types: full app app32
 #endif
 
 [Tasks]

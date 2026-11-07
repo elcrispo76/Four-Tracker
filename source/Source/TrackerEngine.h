@@ -38,6 +38,8 @@ public:
     void requestStop()                        { push ({ Cmd::Stop }); }
     void requestPattern (int p)               { push ({ Cmd::SelectPattern, p }); }
     void requestPreview (int inst, int note, bool loopOnly = false) { push ({ Cmd::Preview, inst, note, loopOnly ? 1 : 0 }); }
+    /** Plays the slot from a start offset (in frames after START), like a note with 09xx. */
+    void requestPreviewAt (int inst, int note, int offsetFrames) { push ({ Cmd::Preview, inst, note, 2 + juce::jmax (0, offsetFrames) }); }
     void requestStopPreview()                 { push ({ Cmd::StopPreview }); }
     /** CHORD: plays one held note on a track of its own (samples, synths and MIDI instruments).
         It goes through that track's VOL / PAN / MUTE and its effects, but leaves the pattern alone. */
@@ -295,7 +297,7 @@ private:
     Voice previewVoice;
     std::array<Voice, kNumChannels> jamVoices;          // CHORD notes, one per track
     std::array<int, kNumChannels> jamMidiNote {}, jamMidiChan {};
-    void startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel);
+    void startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel, int startOffset = 0);
 
     double sr = 44100.0;
     double samplesToNextTick = 0.0;

@@ -1,7 +1,8 @@
-FOUR TRACKER SAMPLE PACK  v1.0
+FOUR TRACKER SAMPLE PACK  v1.1
 ==============================
 
-88 WAV samples (44.1 kHz / 16-bit) for Four Tracker - or any tracker, sampler or DAW.
+88 WAV samples and 44 loops (44.1 kHz / 16-bit) for Four Tracker - or any tracker,
+sampler or DAW.
 Every sound was synthesised from scratch for this pack (drums with
 code, bass and synth sounds with Four Tracker's own SYNTH 2), so no
 third-party recordings are included.
@@ -16,6 +17,8 @@ CONTENTS
   Synth/Pads     juno, strings, choir, 80s strings, gated, sweep
   Synth/Chords   one-shot chords (minor, major, min7, sus4, maj7) on root C
   Synth/Chip     tiny looped chip waveforms (64 frames, loop points set)
+  Loops/     44 tempo-exact loops: DnB, breakbeats, techno and house beats,
+             top loops, basslines, arps and chords (see Loops/README LOOPS.txt)
 
 TIPS FOR FOUR TRACKER
   * The note in the file name is the root note (C2, C3, C4, C5). Load

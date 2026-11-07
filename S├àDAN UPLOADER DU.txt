@@ -1,0 +1,23 @@
+FOUR TRACKER 0.5.5: SÅDAN KOMMER DEN PÅ GITHUB
+================================================
+
+Mapperne ligger præcis som i dit Four-Tracker repo. Ingen filer skal slettes.
+
+1. HJEMMESIDE + MANUAL (roden af repoet)
+   Add file > Upload files. Træk index.html og Four-Tracker-User-Manual.pdf ind. Commit.
+   (Gør det først, når 0.5.5-installeren ligger i releasen - se trin 4.)
+
+2. KODEN
+   Gå ind i mappen source i repoet > Add file > Upload files.
+   Træk mapperne Source, Tests og installer samt CMakeLists.txt og BUILDING-AND-USAGE.md ind.
+   (installer indeholder Sample Pack/Loops: 44 loops + README - 47 filer i alt, under grænsen på 100.)
+   Commit.
+
+3. MAC-OPSKRIFTEN (valgfri)
+   .github/workflows/build-mac.yml: åbn den i repoet, tryk på blyanten og erstat teksten
+   med filen herfra (feltet siger nu v0.5.5). Ellers skriv bare v0.5.5 i feltet når du kører den.
+
+4. RELEASE
+   Byg installeren på din PC som altid (valg 4: FX share).
+   Releases > Draft a new release > tag v0.5.5 > upload FourTracker-Setup-0.5.5-share-fx.exe > Publish.
+   Derefter: Actions > "Mac build" > Run workflow > v0.5.5. Mac-pakken lægger sig selv på releasen.

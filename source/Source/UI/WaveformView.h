@@ -37,6 +37,8 @@ public:
     void setKeysActive (bool a) { if (a != keysActive) { keysActive = a; repaint(); } }
     bool areKeysActive() const noexcept { return keysActive; }
     bool showMarkers = true;
+    /** Step lines (physical frames), e.g. the offset calculator's steps; gridHighlight is drawn brighter. */
+    void setGrid (std::vector<int> frames, int highlight) { grid = std::move (frames); gridHighlight = highlight; repaint(); }
     float lineThickness = 1.4f;
 
     void paint (juce::Graphics&) override;
@@ -66,6 +68,8 @@ private:
     double viewStart = 0, viewLen = 1;
     int cursor = 0, selStart = 0, selEnd = 0, selAnchor = 0;
     int playhead = -1;
+    std::vector<int> grid;
+    int gridHighlight = -1;
     Drag drag = Drag::None;
     int dragLoopOffset = 0;
 

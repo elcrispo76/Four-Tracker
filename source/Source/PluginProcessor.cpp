@@ -998,6 +998,59 @@ void FourTrackerProcessor::ensureDemoFolder()
     }
 }
 
+juce::String FourTrackerProcessor::saveInstrumentSample (int slot, const juce::File& fileIn)
+{
+    if (! juce::isPositiveAndBelow (slot, kNumInstruments)) return "NO SUCH SLOT";
+    auto& in = getInstrument (slot);
+    if (in.isEmpty()) return "NO SAMPLE IN THIS SLOT";
+    if (in.isSynth() || in.isSynth2()) return "A SYNTH CAN'T BE SAVED AS A SAMPLE";
+
+    auto file = fileIn;
+    const bool aiff = file.hasFileExtension ("aif;aiff");
+    if (! aiff && ! file.hasFileExtension ("wav")) file = file.withFileExtension ("wav");
+    file.getParentDirectory().createDirectory();
+
+    std::unordered_map<juce::String, juce::String> md;
+    if (! aiff && in.params.loop && in.params.loopEnd > in.params.loopStart)
+    {
+        md["MidiUnityNote"] = "60";
+        md["NumSampleLoops"] = "1";
+        md["Loop0Identifier"] = "0";
+        md["Loop0Type"] = in.params.pingPong ? "1" : (in.params.loopBackward ? "2" : "0");
+        md["Loop0Start"] = juce::String (in.params.loopStart);
+        md["Loop0End"] = juce::String (in.params.loopEnd);
+        md["Loop0Fraction"] = "0";
+        md["Loop0PlayCount"] = "0";
+    }
+
+    const auto tmp = file.getSiblingFile (file.getFileName() + ".part");
+    tmp.deleteFile();
+    {
+        std::unique_ptr<juce::OutputStream> out (new juce::FileOutputStream (tmp));
+        if (! static_cast<juce::FileOutputStream*> (out.get())->openedOk()) return "CAN'T WRITE " + file.getFileName().toUpperCase();
+        auto opts = juce::AudioFormatWriterOptions{}
+                        .withSampleRate (in.data->sampleRate)
+                        .withNumChannels (in.data->getNumChannels())
+                        .withBitsPerSample (in.data->bitDepth > 16 ? 24 : 16)
+                        .withMetadataValues (md);
+        std::unique_ptr<juce::AudioFormatWriter> writer;
+        if (aiff) { juce::AiffAudioFormat f; writer = f.createWriterFor (out, opts); }
+        else      { juce::WavAudioFormat f;  writer = f.createWriterFor (out, opts); }
+        if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (in.data->buffer, 0, in.data->getLength()))
+        {
+            writer.reset();
+            tmp.deleteFile();
+            return "CAN'T WRITE " + file.getFileName().toUpperCase();
+        }
+    }
+    if (! tmp.moveFileTo (file)) { tmp.deleteFile(); return "CAN'T WRITE " + file.getFileName().toUpperCase(); }
+
+    in.name = file.getFileName().toUpperCase();
+    in.sourcePath = file.getFullPathName();
+    instrumentChanged (slot);
+    return {};
+}
+
 static const char kModuleMagic[4]     = { 'F', 'T', 'M', 'D' };
 static const char kPatternFileMagic[4] = { 'F', 'T', 'P', 'T' };
 static const char kPatternSetMagic[4] = { 'F', 'T', 'P', 'S' };

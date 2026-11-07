@@ -80,7 +80,7 @@ void TrackerEngine::handleCommand (const Cmd& c)
         case Cmd::SelectPattern:  selectPattern (c.a); break;
 
         case Cmd::Preview:
-            startPreviewVoice (previewVoice, c.a, c.b, c.c != 0, previewMidiNote, previewMidiChan, -1);
+            startPreviewVoice (previewVoice, c.a, c.b, c.c == 1, previewMidiNote, previewMidiChan, -1, c.c >= 2 ? c.c - 2 : 0);
             break;
 
         case Cmd::JamOn:
@@ -100,7 +100,7 @@ void TrackerEngine::handleCommand (const Cmd& c)
     }
 }
 
-void TrackerEngine::startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel)
+void TrackerEngine::startPreviewVoice (Voice& v, int inst, int note, bool loopOnly, int& midiNote, int& midiChan, int channel, int startOffset)
 {
     if (inst <= 0 || inst > kAuditionSlot) return;
     auto snap = audioSnapshots[(size_t) inst];
@@ -110,7 +110,8 @@ void TrackerEngine::startPreviewVoice (Voice& v, int inst, int note, bool loopOn
     v.inst = snap;
     v.slot = inst;
     v.loopOnly = loopOnly;
-    v.pos = v.loopOnly && snap->looping ? (double) snap->vLoopStart : 0.0;
+    v.pos = v.loopOnly && snap->looping ? (double) snap->vLoopStart
+                                        : (double) juce::jlimit (0, juce::jmax (0, snap->length - 1), startOffset);
     v.inLoop = v.loopOnly;
     v.dir = 1;
     v.active = true;

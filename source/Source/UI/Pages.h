@@ -237,6 +237,61 @@ private:
     juce::Rectangle<int> panel;
 };
 
+/** The offset codes of one sample as a small picture in its own window: POP OUT on the
+    offset calculator. It stays on top (drag it to the side) while you write the beat. */
+class OffsetChart : public juce::Component
+{
+public:
+    OffsetChart (const juce::String& title, int steps, std::vector<int> codes);
+    void paint (juce::Graphics&) override;
+    int columns() const noexcept { return steps <= 16 ? 4 : 8; }
+    juce::String title;
+    int steps;
+    std::vector<int> codes;     // -1: past 09FF
+};
+
+/** OFFSET CALCULATOR on Sample Edit: splits the sample (START..END) into 4 - 64 equal steps
+    (a 1 bar 4/4 breakbeat = 16 steps) and shows the 09xx code that starts a note on each step.
+    Click a step to hear it from there; WRITE puts C-4 + the slot + 09xx at the pattern cursor. */
+class OffsetCalculator : public juce::Component
+{
+public:
+    OffsetCalculator (EditorState& s, WaveformView& w);
+    void open();
+    void close();
+    bool handleKey (const juce::KeyPress&);   // arrows choose, Space plays, Enter writes, Esc closes
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void sampleChanged();                     // the slot or its points changed
+
+    /** The 09xx parameter for a step (0-based), or -1 when 09FF can't reach it. */
+    static int codeFor (int step, int steps, int length);
+    int  getSteps() const noexcept { return steps; }
+    void setSteps (int n);
+    int  getSelected() const noexcept { return selected; }
+    void select (int step, bool play);
+    void writeAtCursor();
+    std::function<void()> onClose;
+    void popOut();                            // the codes as a picture in a window of their own
+    std::unique_ptr<OffsetChart> makeChart() const;   // what POP OUT shows (null without a sample)
+    juce::OwnedArray<juce::DocumentWindow> chartWindows;   // public for the tests
+
+private:
+    int length() const;                       // START..END in frames (what 09xx counts in)
+    juce::Rectangle<int> cellBounds (int i) const;
+    void updateGrid();
+
+    EditorState& st;
+    WaveformView& wave;
+    int steps = 16, selected = 0;
+    std::array<std::unique_ptr<PixelButton>, 5> stepButtons;
+    PixelButton playBtn { "PLAY STEP", PixelButton::Style::Raised, 16.0f }, writeBtn { "WRITE AT CURSOR", PixelButton::Style::Dark, 16.0f },
+                closeBtn { "CLOSE", PixelButton::Style::Raised, 16.0f },
+                popBtn { "POP OUT", PixelButton::Style::Raised, 16.0f };
+    juce::Rectangle<int> gridArea;
+};
+
 // ===========================================================================
 // Sample edit page
 // ===========================================================================
@@ -265,6 +320,8 @@ private:
     PixelLabel numberLabel { "01", 26.0f, juce::Justification::centred };
     NameBox name { 20.0f };
     PixelButton prev { "", PixelButton::Style::Raised }, next { "", PixelButton::Style::Raised };
+    PixelButton saveBtn { "SAVE", PixelButton::Style::Raised, 18.0f };
+    std::unique_ptr<juce::FileChooser> chooser;
     PixelLabel lengthVal { "", 22.0f, juce::Justification::centred }, rateVal { "", 22.0f, juce::Justification::centred },
                bitsVal { "", 22.0f, juce::Justification::centred }, chansVal { "", 22.0f, juce::Justification::centred };
     ValueBox curPos { 0, 0, 0, 19.0f };
@@ -274,9 +331,10 @@ private:
                 setLoop { "SET LOOP", PixelButton::Style::Segment, 17.0f }, playLoop { "PLAY LOOP", PixelButton::Style::Dark, 17.0f };
     SegmentPair loopMode { "FORWARD", "REVERSE", 17.0f };
     PixelButton cut { "CUT" }, copy { "COPY" }, paste { "PASTE" }, fadeIn { "FADE IN" }, fadeOut { "FADE OUT" },
-                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" }, resampleBtn { "RE-SAMPLE" };
+                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" }, resampleBtn { "RE-SAMPLE" }, offsetBtn { "OFFSET" };
 public:
     ResampleDialog resampler;   // public for the tests
+    OffsetCalculator offsets;
 private:
     PixelButton zoomIn { "" }, zoomOut { "" }, fit { "FIT", PixelButton::Style::Raised, 18.0f }, left { "" }, right { "" };
 

@@ -246,6 +246,27 @@ void WaveformView::paint (Graphics& g)
         g.fillRect (Rectangle<float> (ex, wave.getY(), jmax (0.0f, (float) getWidth() - ex), wave.getHeight()));
     }
 
+    // step grid (offset calculator)
+    if (len > 0 && ! grid.empty())
+    {
+        for (size_t i = 0; i < grid.size(); ++i)
+        {
+            const float x = frameToX (grid[i]);
+            if (x < -2.0f || x > r.getRight() + 2.0f) continue;
+            const bool hi = (int) i == gridHighlight;
+            g.setColour (hi ? Colour (0xffffc040) : Colour (0xb0ff9a2a));
+            if (hi) g.fillRect (x - 1.5f, r.getY(), 3.0f, r.getHeight());
+            else for (float y = wave.getY(); y < r.getBottom(); y += 8.0f) g.fillRect (x - 0.75f, y, 1.5f, 4.0f);
+            if (i > 0 && (hi || grid.size() <= 32))
+            {
+                auto box = Rectangle<float> (x + 2.0f, r.getBottom() - 20.0f, 26.0f, 18.0f);
+                g.setColour (hi ? Colour (0xffffc040) : Colour (0xcc2b2d32));
+                g.fillRect (box);
+                Theme::text (g, String (i + 1), box, 13.0f, hi ? Theme::ink : Theme::screenText, Justification::centred);
+            }
+        }
+    }
+
     // cursor and playhead
     if (interactive && len > 0)
     {
