@@ -10,6 +10,7 @@
 #include "UI/EditorState.h"
 #include "UI/HeaderBar.h"
 #include "UI/Pages.h"
+#include "UI/Mixer.h"
 #include "UI/SettingsPage.h"
 #include "UI/SampleBrowser.h"
 #include "UI/FxPage.h"
@@ -88,6 +89,13 @@ private:
     void toggleFxPage();
    #endif
     void layoutPatternView();
+public:
+    /** MIXER: all tracks with meters, CLIP lamps and faders, in a window of its own (Shift+M or MIX). */
+    void toggleMixer();
+    MixerPanel* getMixer();                  // null while it is closed (for the tests)
+    PixelButton mixButton { "MIX", PixelButton::Style::Raised, 20.0f };
+private:
+    std::unique_ptr<juce::DocumentWindow> mixerWindow;
 
     PixelButton tabInstruments { "INSTRUMENTS", PixelButton::Style::Tab, 17.0f },
                 tabSample      { "SAMPLE EDIT", PixelButton::Style::Tab, 17.0f },

@@ -46,7 +46,7 @@ void TitleBar::paint (Graphics& g)
     g.setColour (Theme::titleBar);
     g.fillRect (r);
 
-    auto titleArea = r.removeFromLeft (r.getWidth() * 0.43f).reduced (4.0f);
+    auto titleArea = r.removeFromLeft (titleMaxWidth > 0.0f ? jmin (r.getWidth() * 0.43f, titleMaxWidth) : r.getWidth() * 0.43f).reduced (4.0f);
     g.setColour (Theme::panelEdgeHi.darker (0.05f));
     g.fillRect (titleArea);
     g.setColour (Theme::ink);

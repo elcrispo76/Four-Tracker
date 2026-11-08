@@ -73,6 +73,11 @@ public:
     std::atomic<int>  queuedPattern  { -1 };
     std::atomic<int>  lastInstrumentOnChannel[kNumChannels] {};
     std::atomic<int>  channelLevel[kNumChannels] {};   // 0..1000, for meters
+    /** For the MIXER: the loudest sample of each track (after its volume and its VST effects) and of
+        the master mix before the limiter, since the mixer last read them. 1.0 = 0 dBFS; above it the
+        track is overdriven (clips). The mixer takes them with exchange (0). */
+    std::atomic<float> mixerPeak[kNumChannels] {};
+    std::atomic<float> masterPeak { 0.0f };
     std::atomic<int>  lastMidiNote   { -1 };
     std::atomic<int>  previewPosition{ -1 };           // physical frame of the preview voice, -1 when idle
 

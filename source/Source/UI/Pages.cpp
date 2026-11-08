@@ -1531,8 +1531,8 @@ void OffsetCalculator::open()
 {
     selected = 0;
     wave.zoomFit();                 // every step in view
-    sampleChanged();
     setVisible (true);
+    sampleChanged();
     toFront (false);
     st.setStatus ("OFFSET: CLICK A STEP TO HEAR IT - ENTER WRITES IT AT THE CURSOR");
     st.changed();
@@ -1567,7 +1567,7 @@ void OffsetCalculator::sampleChanged()
 
 void OffsetCalculator::updateGrid()
 {
-    if (! isVisible() && ! isShowing()) { /* still keep the grid for open() */ }
+    if (! isVisible()) { wave.setGrid ({}, -1); return; }   // the step lines only show while the calculator is open
     const int len = length();
     if (len <= 0) { wave.setGrid ({}, -1); return; }
     const auto& p = st.proc.getInstrument (st.proc.selectedInstrument).params;

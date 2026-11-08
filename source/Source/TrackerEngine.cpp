@@ -1323,6 +1323,7 @@ void TrackerEngine::renderVoices (float* L, float* R, int offset, int numSamples
         renderWithSynth2Fx ({ &cs.voice, &cs.ghost, &jamVoices[(size_t) ch] }, ch, cl, cr, numSamples, peak, ch);
         const int lvl = juce::jmin (1000, (int) (peak * 1000.0f));
         if (lvl > channelLevel[ch].load()) channelLevel[ch] = lvl;
+        if (! useChannelBuffers && peak > mixerPeak[ch].load()) mixerPeak[ch] = peak;   // with inserts: measured after the effects
     }
 
     // the preview / jam voice (computer keys, clicking a slot) has its own SYNTH 2 FX
@@ -1491,6 +1492,13 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
                 float* cl = chanL (ch);
                 float* cr = chanR (ch);
                 channelInsert (ch, cl, cr, n);
+                {
+                    // the mixer meter: what the track sends on, after its effects
+                    const auto rl = juce::FloatVectorOperations::findMinAndMax (cl, n);
+                    const auto rr = juce::FloatVectorOperations::findMinAndMax (cr, n);
+                    const float pk = juce::jmax (std::abs (rl.getStart()), std::abs (rl.getEnd()), juce::jmax (std::abs (rr.getStart()), std::abs (rr.getEnd())));
+                    if (pk > mixerPeak[ch].load()) mixerPeak[ch] = pk;
+                }
                 const int t = next[ch];
                 juce::FloatVectorOperations::add (t >= 0 ? chanL (t) : L, cl, n);
                 juce::FloatVectorOperations::add (t >= 0 ? chanR (t) : R, cr, n);
@@ -1543,6 +1551,13 @@ void TrackerEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuff
         if (a <= 0.8f) return x;
         return std::copysign (0.8f + 0.2f * std::tanh ((a - 0.8f) / 0.2f), x);
     };
+    {
+        // the mixer's master meter: the mix with MASTER volume, before the limiter
+        float pk = 0.0f;
+        for (int i = 0; i < n; ++i) pk = juce::jmax (pk, std::abs (L[i]), std::abs (R[i]));
+        pk *= master;
+        if (pk > masterPeak.load()) masterPeak = pk;
+    }
     if (out.getNumChannels() > 1)
     {
         for (int i = 0; i < n; ++i) { const float g = master * fadeAt (i); L[i] = shape (L[i] * g); R[i] = shape (R[i] * g); }

@@ -208,4 +208,7 @@ if not exist "%OUT%" mkdir "%OUT%"
 copy /Y "%ART%\Standalone\Four Tracker.exe" "%OUT%\" >nul
 if exist "%ART%\VST3\Four Tracker.vst3" xcopy /E /I /Y /Q "%ART%\VST3\Four Tracker.vst3" "%OUT%\Four Tracker.vst3" >nul
 if exist "%ART%\VST\Four Tracker.dll" copy /Y "%ART%\VST\Four Tracker.dll" "%OUT%\" >nul
+rem the Pattern Maker (a program of its own, optional in the installer)
+set "PMART=%BDIR%\FourTrackerPatternMaker_artefacts\Release"
+if exist "%PMART%\Four Tracker Pattern Maker.exe" copy /Y "%PMART%\Four Tracker Pattern Maker.exe" "%OUT%\" >nul
 exit /b 0

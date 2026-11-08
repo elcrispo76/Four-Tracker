@@ -14,6 +14,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "MakerComponent.h"
 
 using namespace juce;
 
@@ -977,6 +978,85 @@ int main (int argc, char** argv)
             for (int i = ft::kNumInstruments - 1; i >= 1 && emptySlot < 0; --i) if (pb->getInstrument (i).isEmpty()) emptySlot = i;
             auto* sep = dynamic_cast<SampleEditPage*> (findC (*edb, [] (Component& c) { return dynamic_cast<SampleEditPage*> (&c) != nullptr; }));
             CHECK (sep != nullptr && emptySlot > 0, "RE-SAMPLE: Sample Edit page and an empty slot (" + String (emptySlot) + ")");
+
+            // MIXER: meters per track and master, CLIP lamps, faders (Shift+M / MIX)
+            {
+                auto* fe = dynamic_cast<FourTrackerEditor*> (edb.get());
+                CHECK (fe != nullptr && findC (*edb, [] (Component& c) { return c.getComponentID() == "mixButton"; }) != nullptr, "MIX button in the title bar");
+                EditorState ms (*pb);
+                MixerPanel mixer (ms);
+                mixer.setSize (mixer.preferredWidth(), MixerPanel::kHeight);
+                const int nch = ms.numChannels();
+                CHECK (mixer.getStrip (0) != nullptr && mixer.getStrip (0)->isVisible() && (nch >= 16 || ! mixer.getStrip (nch)->isVisible()),
+                       "MIXER: a strip for each of the " + String (nch) + " tracks");
+                // the engine measures each track after its volume
+                for (auto& m : eb.mixerPeak) m = 0.0f;
+                eb.masterPeak = 0.0f;
+                const auto keepCell = eb.getPattern (eb.selectedPattern.load()).at (0, 0);
+                {
+                    const ScopedLock sl (eb.getDataLock());
+                    auto& pat = eb.getPattern (eb.selectedPattern.load());
+                    pat.at (0, 0).note = (uint8_t) ft::kNativeNote; pat.at (0, 0).inst = 4;
+                }
+                eb.mix[0].volume = 64;
+                eb.requestStartStop();
+                for (int b = 0; b < 40; ++b) { AudioBuffer<float> buf (2, 256); MidiBuffer mb; pb->processBlock (buf, mb); }
+                const float full = eb.mixerPeak[0].exchange (0.0f), other = eb.mixerPeak[5].exchange (0.0f), mst = eb.masterPeak.exchange (0.0f);
+                eb.requestStop();
+                { AudioBuffer<float> buf (2, 256); MidiBuffer mb; pb->processBlock (buf, mb); }
+                CHECK (full > 0.05f && other == 0.0f && mst > 0.0f, "MIXER: the engine meters track 1 (" + String (full, 3) + "), not a silent track, and the master (" + String (mst, 3) + ")");
+                // a track over 0 dBFS lights its CLIP lamp, and it stays lit until RESET CLIPS
+                eb.mixerPeak[0] = 1.4f; eb.mixerPeak[1] = 0.5f; eb.masterPeak = 1.2f;
+                mixer.refresh();
+                CHECK (mixer.getStrip (0)->isClipped() && ! mixer.getStrip (1)->isClipped() && mixer.getMaster().isClipped(),
+                       "MIXER: track 1 over 0 dB lights CLIP, track 2 at -6 dB doesn't, the master lights LIMIT");
+                eb.mixerPeak[2] = 0.9f; eb.mixerPeak[3] = 0.3f; eb.mixerPeak[1] = 0.6f;
+                mixer.refresh();
+                CHECK (mixer.getStrip (0)->isClipped(), "MIXER: CLIP stays lit");
+                if (screens)
+                {
+                    auto img = mixer.createComponentSnapshot (mixer.getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("27_mixer.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                }
+                if (screens)
+                {
+                    // the same with 16 tracks
+                    const int keepN = eb.numChannels.load();
+                    eb.numChannels = 16;
+                    for (int c = 0; c < 16; ++c) eb.mixerPeak[c] = 0.05f + 0.06f * (float) ((c * 7) % 16);
+                    eb.masterPeak = 0.8f;
+                    mixer.refresh();
+                    mixer.setSize (mixer.preferredWidth(), MixerPanel::kHeight);
+                    auto img = mixer.createComponentSnapshot (mixer.getLocalBounds(), true, 1.0f);
+                    auto file = outDir.getChildFile ("28_mixer_16.png");
+                    file.deleteFile();
+                    FileOutputStream fos (file);
+                    PNGImageFormat().writeImageToStream (img, fos);
+                    eb.numChannels = keepN;
+                    mixer.refresh();
+                }
+                // the fader turns the track down
+                mixer.getStrip (0)->setVolume (40);
+                CHECK (eb.mix[0].volume.load() == 40, "MIXER: the fader sets the track's volume");
+                mixer.getMaster().setVolume (70);
+                CHECK (eb.masterVolume.load() == 70, "MIXER: the master fader sets MASTER");
+                if (auto* mute = dynamic_cast<Button*> (findC (mixer, [] (Component& c) { return c.getComponentID() == "mixMute1"; }))) mute->triggerClick();
+                MessageManager::getInstance()->runDispatchLoopUntil (20);
+                CHECK (eb.mix[1].mute.load(), "MIXER: M mutes the track");
+                eb.mix[1].mute = false;
+                mixer.resetClips();
+                CHECK (! mixer.getStrip (0)->isClipped() && ! mixer.getMaster().isClipped(), "MIXER: RESET CLIPS");
+                CHECK (MixerStrip::meterPos (0.0f) > 0.85f && MixerStrip::meterPos (6.0f) == 1.0f && MixerStrip::meterPos (-60.0f) == 0.0f, "MIXER: meter scale -48 .. +6 dB");
+                eb.mix[0].volume = 64; eb.masterVolume = 80;
+                {
+                    const ScopedLock sl (eb.getDataLock());
+                    auto& pat = eb.getPattern (eb.selectedPattern.load());
+                    pat.at (0, 0) = keepCell;
+                }
+            }
 
             // OFFSET CALCULATOR: 09xx codes for a beat in 4 - 64 steps, on the waveform, written at the cursor
             CHECK (OffsetCalculator::codeFor (1, 16, 264600) == 0x41 && OffsetCalculator::codeFor (3, 16, 264600) == 0xc2
@@ -3180,6 +3260,88 @@ int main (int argc, char** argv)
         eds2.reset();
         ps2.reset();
         CHECK (true, "soak: standalone session with audio thread survived");
+    }
+
+    // ===================================================================
+    // PATTERN MAKER: styles make sense, the pattern saves as .ftpat and loads in Four Tracker
+    // ===================================================================
+    {
+        using namespace pm;
+        bool kicksOk = true, bassInScale = true, lanesOk = true;
+        for (int st = 0; st < (int) Style::NumStyles; ++st)
+            for (int seed = 1; seed <= 5; ++seed)
+            {
+                Settings set; set.style = (Style) st; set.seed = seed * 77; set.key = 5; set.scale = Scale::Minor; set.bars = 4;
+                const auto p = generate (set);
+                if (! p.lanes[0].on || ! p.lanes[0].steps[0].on) kicksOk = false;         // a kick on the one
+                for (int i = 0; i < kNumLanes; ++i) if (p.lanes[(size_t) i].kind != (LaneKind) i) lanesOk = false;
+                const auto& sc = scaleSteps (Scale::Minor);
+                for (auto& stp : p.lanes[6].steps)
+                    if (stp.on && std::find (sc.begin(), sc.end(), ((stp.note % 12) + 12) % 12) == sc.end()) bassInScale = false;
+            }
+        CHECK (kicksOk && lanesOk, "PATTERN MAKER: every style has a kick on the one (8 styles x 5)");
+        CHECK (bassInScale, "PATTERN MAKER: bass notes stay in the scale");
+
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+        auto pmProc = std::make_unique<FourTrackerProcessor>();
+        SoundLibrary lib;
+        lib.pack = File::getCurrentWorkingDirectory().getChildFile ("installer/Sample Pack");
+        if (! lib.isValid()) lib.pack = File (__FILE__).getParentDirectory().getParentDirectory().getChildFile ("installer/Sample Pack");
+        CHECK (lib.isValid() && lib.defaultSound (Style::DnB, LaneKind::Bass).getFileName() == "BASS REESE C2.wav", "PATTERN MAKER: finds the sample pack and its sounds");
+        {
+            MakerComponent maker (*pmProc, lib);
+            maker.setStyle (Style::DnB, true);
+            auto& pat = maker.getPattern();
+            CHECK (pat.settings.bpm == 174 && pmProc->getEngine().bpm.load() == 174, "PATTERN MAKER: DNB at 174 BPM");
+            int lanesOn = 0; for (auto& l : pat.lanes) if (l.on) ++lanesOn;
+            CHECK (pmProc->getInstrument (1).name == "KICK HARD.WAV" && pmProc->getInstrument (7).name == "BASS REESE C2.WAV", "PATTERN MAKER: the lanes' sounds are in slots 01-08 (" + pmProc->getInstrument (1).name + ")");
+            // plays through Four Tracker's engine
+            pmProc->prepareToPlay (44100.0, 512);
+            maker.togglePlay();
+            float peak = 0.0f;
+            for (int b = 0; b < 200; ++b) { AudioBuffer<float> buf (2, 512); MidiBuffer mb; pmProc->processBlock (buf, mb); peak = jmax (peak, buf.getMagnitude (0, 512)); }
+            maker.togglePlay();
+            CHECK (peak > 0.05f, "PATTERN MAKER: PLAY sounds (" + String (peak, 3) + ")");
+            if (screens)
+            {
+                auto img = maker.createComponentSnapshot (maker.getLocalBounds(), true, 1.0f);
+                auto file = outDir.getChildFile ("30_pattern_maker.png");
+                file.deleteFile();
+                FileOutputStream fos (file);
+                PNGImageFormat().writeImageToStream (img, fos);
+            }
+            // SAVE, then LOAD PATTERN in a Four Tracker that already has a song
+            const auto f = outDir.getChildFile ("pattern maker test.ftpat");
+            f.deleteFile();
+            const auto err = maker.saveTo (f);
+            CHECK (err.isEmpty() && f.existsAsFile(), "PATTERN MAKER: SAVE writes a .ftpat " + err);
+            AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+            auto ft = std::make_unique<FourTrackerProcessor>();       // the demo song: slots 01-09 are taken
+            const int target = ft->findEmptyPattern (0);
+            bool ok = false;
+            const auto msg = ft->loadPattern (f, target, ok);
+            int notes = 0, kicksAtOne = 0, newSlots = 0;
+            std::set<int> instsUsed;
+            const auto& lp = ft->getEngine().getPattern (target);
+            for (int r = 0; r < lp.getNumRows(); ++r)
+                for (int c = 0; c < ft::kNumChannels; ++c)
+                {
+                    const auto& cell = lp.at (r, c);
+                    if (cell.note > 0 && cell.note <= 96) { ++notes; instsUsed.insert (cell.inst); }
+                    if (r == 0 && c == 0 && cell.note == ft::kNativeNote) ++kicksAtOne;
+                }
+            for (int i : instsUsed) if (i >= 10 && ! ft->getInstrument (i).isEmpty()) ++newSlots;
+            CHECK (ok && lp.getNumRows() == 64 && notes > 20 && kicksAtOne == 1 && ! instsUsed.count (0),
+                   "PATTERN MAKER: Four Tracker loads it with LOAD PATTERN (" + String (notes) + " notes, " + msg + ")");
+            CHECK ((int) instsUsed.size() == lanesOn && newSlots == lanesOn, "PATTERN MAKER: its " + String (lanesOn) + " sounds come along into free slots");
+            // a 1-bar house pattern without the sample pack: Four Tracker's built-in sounds
+            SoundLibrary none;
+            AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+            auto p2 = std::make_unique<FourTrackerProcessor>();
+            MakerComponent m2 (*p2, none);
+            CHECK (! p2->getInstrument (1).isEmpty() && p2->getInstrument (1).name == "KICK.WAV", "PATTERN MAKER: without the pack it uses the built-in sounds");
+        }
+        pmProc.reset();
     }
 
     proc.reset();

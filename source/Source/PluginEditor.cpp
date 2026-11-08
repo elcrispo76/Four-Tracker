@@ -43,6 +43,11 @@ FourTrackerEditor::FourTrackerEditor (FourTrackerProcessor& p)
     root.addChildComponent (sampleBrowser);
     root.addAndMakeVisible (trackCount);
     root.addAndMakeVisible (masterVolume);
+    root.addAndMakeVisible (mixButton);
+    mixButton.setComponentID ("mixButton");
+    mixButton.setWantsKeyboardFocus (false);
+    mixButton.setMouseClickGrabsKeyboardFocus (false);
+    mixButton.onClick = [this] { toggleMixer(); };
     // REC only in the program itself: in a DAW, the DAW records
     if (proc.wrapperType == AudioProcessor::wrapperType_Standalone) root.addAndMakeVisible (recBar);
     recBar.onStatus = [this] (const String& s) { state.setStatus (s); title.refresh(); state.changed(); };
@@ -104,6 +109,55 @@ FourTrackerEditor::~FourTrackerEditor()
 {
     proc.removeChangeListener (this);
     stopTimer();
+    mixerWindow.reset();
+}
+
+namespace
+{
+    struct MixerWindow : public DocumentWindow
+    {
+        explicit MixerWindow (std::function<void()> closeFn)
+            : DocumentWindow ("Four Tracker - Mixer", Theme::background, DocumentWindow::closeButton), onCloseClicked (std::move (closeFn)) {}
+        void closeButtonPressed() override { if (onCloseClicked) onCloseClicked(); }
+        std::function<void()> onCloseClicked;
+    };
+}
+
+MixerPanel* FourTrackerEditor::getMixer()
+{
+    return mixerWindow != nullptr ? dynamic_cast<MixerPanel*> (mixerWindow->getContentComponent()) : nullptr;
+}
+
+void FourTrackerEditor::toggleMixer()
+{
+    if (mixerWindow != nullptr)
+    {
+        // closed from its own key handler or close button: delete it after the call returns
+        Component::SafePointer<FourTrackerEditor> safe (this);
+        MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->mixerWindow.reset(); safe->mixButton.setToggleState (false, dontSendNotification); safe->grabKeyboardFocus(); } });
+        mixerWindow->setVisible (false);
+        state.setStatus ("MIXER CLOSED");
+        state.changed();
+        return;
+    }
+    auto* panel = new MixerPanel (state);
+    panel->onKey = [this] (const KeyPress& k) { return keyPressed (k); };
+    panel->onClose = [this] { toggleMixer(); };
+    panel->onKeyState = [this] (bool down) { return keyStateChanged (down); };
+    auto w = std::make_unique<MixerWindow> ([this] { toggleMixer(); });
+    w->setUsingNativeTitleBar (true);
+    w->setContentOwned (panel, true);
+    w->setResizable (false, false);
+    w->setAlwaysOnTop (true);
+    auto* win = w.get();
+    panel->onWidthChanged = [win] (int width) { win->setContentComponentSize (width, MixerPanel::kHeight); };
+    const auto b = getScreenBounds();
+    w->setTopLeftPosition (jmax (0, b.getCentreX() - w->getWidth() / 2), jmax (0, b.getY() + 120));
+    w->setVisible (true);
+    mixerWindow = std::move (w);
+    mixButton.setToggleState (true, dontSendNotification);
+    state.setStatus ("MIXER: SHIFT+M OR MIX CLOSES IT");
+    state.changed();
 }
 
 void FourTrackerEditor::paint (Graphics& g)
@@ -139,7 +193,9 @@ void FourTrackerEditor::resized()
         trackCount.setBounds (right - 196, 18, 196, 50);
         masterVolume.setBounds (trackCount.getX() - 206, 18, 196, 50);
         recBar.setBounds (masterVolume.getX() - 282, 18, 272, 50);
-        title.rightReserve = (float) (1456 - (recBar.isVisible() ? recBar.getX() : masterVolume.getX()) + 24);
+        mixButton.setBounds ((recBar.isVisible() ? recBar.getX() : masterVolume.getX()) - 104, 18, 94, 50);
+        title.rightReserve = (float) (1456 - mixButton.getX() + 24);
+        title.titleMaxWidth = (float) (mixButton.getX() - title.getX() - 6);
     }
    #if FOURTRACKER_FX_HOST
     if (fxPage != nullptr) fxPage->setBounds (14, 84, 1508, 844);
@@ -325,6 +381,8 @@ bool FourTrackerEditor::keyPressed (const KeyPress& k)
     auto& e = proc.getEngine();
 
     if (sampleBrowser.isVisible()) return sampleBrowser.keyPressed (k);
+    // Shift+M: the MIXER window
+    if ((code == 'M' || code == 'm') && mods.isShiftDown() && ! mods.isCommandDown() && ! mods.isAltDown()) { toggleMixer(); return true; }
    #if FOURTRACKER_FX_HOST
     if (fxPage != nullptr && (fxPage->isVisible() || code == KeyPress::F8Key))
     {

@@ -16,6 +16,7 @@ public:
     std::function<void()> onGridClicked;
     void mouseDown (const juce::MouseEvent&) override;
     float rightReserve = 0.0f;   // room kept free left of the grid icon (FX button)
+    float titleMaxWidth = 0.0f;  // the light FOUR TRACKER box ends before the MIX button
 
 private:
     EditorState& st;

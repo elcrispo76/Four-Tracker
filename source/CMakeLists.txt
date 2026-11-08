@@ -136,6 +136,7 @@ target_sources(FourTracker PRIVATE
     Source/UI/PatternView.cpp
     Source/UI/HeaderBar.cpp
     Source/UI/Pages.cpp
+    Source/UI/Mixer.cpp
     Source/UI/SettingsPage.cpp
     Source/UI/SampleBrowser.cpp
     Source/FxHost.cpp
@@ -236,8 +237,8 @@ if(FOURTRACKER_BUILD_TESTS)
     juce_add_console_app(FourTrackerTests PRODUCT_NAME "FourTrackerTests")
     get_target_property(FT_SOURCES FourTracker SOURCES)
     list(FILTER FT_SOURCES INCLUDE REGEX "^Source/")
-    target_sources(FourTrackerTests PRIVATE Tests/EngineTest.cpp ${FT_SOURCES})
-    target_include_directories(FourTrackerTests PRIVATE Source)
+    target_sources(FourTrackerTests PRIVATE Tests/EngineTest.cpp ${FT_SOURCES} PatternMaker/PatternGen.cpp PatternMaker/MakerComponent.cpp)
+    target_include_directories(FourTrackerTests PRIVATE Source PatternMaker)
     target_compile_definitions(FourTrackerTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_MODAL_LOOPS_PERMITTED=1)
     if(FOURTRACKER_FX_HOST)
@@ -254,4 +255,37 @@ if(FOURTRACKER_BUILD_TESTS)
     target_link_libraries(FourTrackerTests PRIVATE ft_lame
         juce::juce_audio_utils juce::juce_audio_formats juce::juce_audio_devices juce::juce_audio_processors
         juce::juce_recommended_config_flags)
+endif()
+
+
+# Four Tracker Pattern Maker: a program of its own that makes beats, basslines and arps and saves
+# them as .ftpat files for LOAD PATTERN. It plays them with Four Tracker's own engine.
+option(FOURTRACKER_BUILD_PATTERN_MAKER "Build the Pattern Maker program" ON)
+if(FOURTRACKER_BUILD_PATTERN_MAKER)
+    juce_add_gui_app(FourTrackerPatternMaker
+        PRODUCT_NAME "Four Tracker Pattern Maker"
+        COMPANY_NAME "elcrispo76"
+        BUNDLE_ID com.fourtracker.patternmaker
+        VERSION 1.0.0
+        ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon_1024.png")
+    get_target_property(FT_PM_SOURCES FourTracker SOURCES)
+    list(FILTER FT_PM_SOURCES INCLUDE REGEX "^Source/")
+    list(FILTER FT_PM_SOURCES EXCLUDE REGEX "StandaloneApp")
+    target_sources(FourTrackerPatternMaker PRIVATE PatternMaker/Main.cpp PatternMaker/PatternGen.cpp PatternMaker/MakerComponent.cpp
+        ${FT_PM_SOURCES})
+    target_include_directories(FourTrackerPatternMaker PRIVATE Source PatternMaker)
+    target_compile_definitions(FourTrackerPatternMaker PRIVATE
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1
+        JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_APPLICATION_NAME_STRING="Four Tracker Pattern Maker" JUCE_APPLICATION_VERSION_STRING="1.0.0")
+    if(WIN32 AND ASIO_SDK_DIR AND EXISTS "${ASIO_SDK_DIR}/common/iasiodrv.h")
+        target_compile_definitions(FourTrackerPatternMaker PRIVATE JUCE_ASIO=1)
+        target_include_directories(FourTrackerPatternMaker PRIVATE "${ASIO_SDK_DIR}/common")
+    endif()
+    if(FOURTRACKER_HEADLESS_CHECK)
+        target_compile_definitions(FourTrackerPatternMaker PRIVATE
+            JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)
+    endif()
+    target_link_libraries(FourTrackerPatternMaker PRIVATE ft_lame
+        juce::juce_audio_utils juce::juce_audio_formats juce::juce_audio_devices juce::juce_audio_processors
+        juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
 endif()

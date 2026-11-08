@@ -105,6 +105,7 @@ of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent be
 | Ctrl+F3 / F4 / F5 | Cut / copy / paste the block: the whole pattern, all 4 channels and all rows (64 rows = 4 bars) |
 | Shift+F3 / F4 / F5 | Cut / copy / paste track (one whole channel) |
 | Shift+1 / Shift+2 | Transpose the track at the cursor a note up / down |
+| Shift+M | MIXER window on / off (also the MIX button in the title bar) |
 | Ctrl+1 / Ctrl+2 | Transpose the track at the cursor an octave up / down |
 | Ctrl+Z / Ctrl+Y | Undo / redo pattern edits |
 | F3 / F4 | REC / STOP (the program only): record the jam, stop and save it |
@@ -321,6 +322,26 @@ cmake --build build --config Release
 
 Use `-A Win32` for 32-bit. Add `-DFOURTRACKER_BUILD_TESTS=ON` to also build `FourTrackerTests`. That offline test
 plays the patterns through MIDI, checks the switching and saves a WAV.
+
+
+## Mixer
+
+- **Shift+M** or **MIX** in the title bar opens the MIXER in a window of its own that stays on top: a strip for every
+  track in use (4, 8 or 16) and the master.
+- Each strip has a peak meter (after VOL and the VST effects; green, yellow from -6 dB, red over 0 dB = overdriven),
+  a **CLIP** lamp that lights when the track goes over 0 dB and stays lit until clicked or **RESET CLIPS**, a volume
+  fader (VOL 0-64, double-click = 64, mouse wheel), pan, MUTE (M) and SOLO (S).
+- **MASTER**: the mix with MASTER volume (0-100) before the limiter; **LIMIT** lights when the limiter has to squeeze it.
+- The engine measures it in `mixerPeak[]` / `masterPeak` (1.0 = 0 dBFS); the computer keys still play in the window.
+
+## Pattern Maker (optional program)
+
+`PatternMaker/` holds **Four Tracker Pattern Maker**, a program of its own (CMake target `FourTrackerPatternMaker`,
+built with the rest; `-DFOURTRACKER_BUILD_PATTERN_MAKER=OFF` leaves it out). It makes beats, basslines and arps in
+8 styles (house, techno, drum & bass, jungle, breakbeat, electro, hip hop, trance) on 8 lanes with sounds from the
+sample pack, plays them with Four Tracker's own engine, and saves them as `.ftpat` (with their sounds) for
+**LOAD PATTERN**. Bass and arp follow KEY and SCALE; SWING is written as `0E Dx`, soft hits as `0C xx`.
+The Windows installer and the Mac package have it as an optional part, off unless ticked.
 
 ## FX version (VST effects)
 
