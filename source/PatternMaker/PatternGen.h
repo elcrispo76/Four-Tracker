@@ -36,7 +36,7 @@ struct Lane
     std::array<Step, kMaxSteps> steps {};
 };
 
-enum class Style { House, Techno, DnB, Jungle, Breakbeat, Electro, HipHop, Trance, NumStyles };
+enum class Style { House, Techno, DnB, Jungle, Breakbeat, Electro, HipHop, Trance, ItaloDisco, Ambient, NumStyles };
 enum class Scale { Minor, Major, Dorian, Phrygian, HarmonicMinor, MinorPentatonic, NumScales };
 
 struct Settings

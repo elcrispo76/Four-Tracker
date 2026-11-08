@@ -338,10 +338,19 @@ plays the patterns through MIDI, checks the switching and saves a WAV.
 
 `PatternMaker/` holds **Four Tracker Pattern Maker**, a program of its own (CMake target `FourTrackerPatternMaker`,
 built with the rest; `-DFOURTRACKER_BUILD_PATTERN_MAKER=OFF` leaves it out). It makes beats, basslines and arps in
-8 styles (house, techno, drum & bass, jungle, breakbeat, electro, hip hop, trance) on 8 lanes with sounds from the
+10 styles (house, techno, drum & bass, jungle, breakbeat, electro, hip hop, trance, italo disco, ambient) on 8 lanes with sounds from the
 sample pack, plays them with Four Tracker's own engine, and saves them as `.ftpat` (with their sounds) for
 **LOAD PATTERN**. Bass and arp follow KEY and SCALE; SWING is written as `0E Dx`, soft hits as `0C xx`.
 The Windows installer and the Mac package have it as an optional part, off unless ticked.
+
+## Pattern Manager (optional program)
+
+`PatternManager/` holds **Four Tracker Pattern Manager** (CMake target `FourTrackerPatternManager`, small: no engine).
+It plays a whole song in Four Tracker - a list of positions (pattern number + rows) - by sending Four Tracker's pattern
+keys (start/stop key + 1 + pattern) over a virtual MIDI cable: LoopBe1 or loopMIDI on Windows, its own virtual port on
+macOS / Linux. Set Four Tracker's PATTERN SWITCH to END OF PATTERN: the next key is sent half way through the pattern
+that plays, so the switch lands exactly at its end. BPM and SPEED are set by hand. Song lists: `.ftsong` (JSON).
+Optional in the installers, off unless ticked.
 
 ## FX version (VST effects)
 

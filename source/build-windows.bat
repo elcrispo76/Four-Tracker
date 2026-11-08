@@ -21,10 +21,13 @@ cd /d "%~dp0"
 title Four Tracker - build
 
 set "EXTRA="
+set "PM=1"
 set "SUFFIX="
 set "DISTDIR=dist"
 if /i "%~1"=="fx" (
-    set "EXTRA=-DFOURTRACKER_FX_HOST=ON -DFOURTRACKER_NO_VST2=OFF"
+    rem your own version: without the Pattern Maker (it is in the share version), so it needs less disk space
+    set "EXTRA=-DFOURTRACKER_FX_HOST=ON -DFOURTRACKER_NO_VST2=OFF -DFOURTRACKER_BUILD_PATTERN_MAKER=OFF"
+    set "PM=0"
     set "SUFFIX=-fx"
     set "DISTDIR=dist-fx"
     echo  *** FX-VERSION: kan hente VST3- og VST2-effekter - kun til dig selv ***
@@ -199,8 +202,22 @@ if errorlevel 1 (
     "%CMAKE%" -S . -B "%BDIR%" -A %1 %EXTRA%
 )
 if errorlevel 1 exit /b 1
-"%CMAKE%" --build "%BDIR%" --config Release --parallel
+rem Four Tracker first (program and plugins) ...
+"%CMAKE%" --build "%BDIR%" --config Release --parallel --target FourTracker_All
 if errorlevel 1 exit /b 1
+rem ... then the Pattern Maker on its own, with fewer jobs at a time so the compiler doesn't run out of memory.
+rem If it still fails, Four Tracker is built anyway: the installer is then made without the Pattern Maker.
+if "%PM%"=="0" goto :afterpm
+rem the Pattern Manager (small, plays a whole song over a virtual MIDI cable)
+"%CMAKE%" --build "%BDIR%" --config Release --parallel 2 --target FourTrackerPatternManager
+if errorlevel 1 echo  [ADVARSEL] Pattern Manager kunne ikke bygges - installeren laves uden den.
+"%CMAKE%" --build "%BDIR%" --config Release --parallel 2 --target FourTrackerPatternMaker
+if errorlevel 1 (
+    echo.
+    echo  [ADVARSEL] Pattern Maker kunne ikke bygges - Four Tracker er bygget, installeren laves uden Pattern Maker.
+    echo.
+)
+:afterpm
 
 set "ART=%BDIR%\FourTracker_artefacts\Release"
 set "OUT=%DISTDIR%\%2"
@@ -211,4 +228,6 @@ if exist "%ART%\VST\Four Tracker.dll" copy /Y "%ART%\VST\Four Tracker.dll" "%OUT
 rem the Pattern Maker (a program of its own, optional in the installer)
 set "PMART=%BDIR%\FourTrackerPatternMaker_artefacts\Release"
 if exist "%PMART%\Four Tracker Pattern Maker.exe" copy /Y "%PMART%\Four Tracker Pattern Maker.exe" "%OUT%\" >nul
+set "PGART=%BDIR%\FourTrackerPatternManager_artefacts\Release"
+if exist "%PGART%\Four Tracker Pattern Manager.exe" copy /Y "%PGART%\Four Tracker Pattern Manager.exe" "%OUT%\" >nul
 exit /b 0

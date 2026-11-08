@@ -392,7 +392,7 @@ footer .wrap { display: grid; gap: 8px; }
             <span class="cell">ENTER &nbsp;WRITE AT CURSOR</span>
             <span class="cell">POP OUT &nbsp;CHART WINDOW</span>
           </div>
-          <p><b>Also new:</b> the optional <a href="#pattern-maker">PATTERN MAKER</a> that makes beats, basslines and arps for LOAD PATTERN, a 16-track MIXER (Shift+M or MIX) with peak meters, CLIP lamps that light when a track goes into the red, and a fader for every track. SAVE on Sample Edit saves a sample as WAV or AIFF (your MIX and RE-SAMPLE loops, with their loop points), and the sample pack now has 44 loops: DnB, breakbeats, techno and house beats, basslines, arps and chords, tempo-exact and free to use (CC0). From v0.5.4: TRANSPOSE TRACK (Shift / Ctrl + 1 / 2) and the VST effects saved in the module.</p>
+          <p><b>Also new:</b> the optional <a href="#pattern-maker">PATTERN MAKER</a> (beats, basslines and arps for LOAD PATTERN) and <a href="#pattern-maker">PATTERN MANAGER</a> (a whole song from a list of patterns, no DAW needed), a 16-track MIXER (Shift+M or MIX) with peak meters, CLIP lamps that light when a track goes into the red, and a fader for every track. SAVE on Sample Edit saves a sample as WAV or AIFF (your MIX and RE-SAMPLE loops, with their loop points), and the sample pack now has 44 loops: DnB, breakbeats, techno and house beats, basslines, arps and chords, tempo-exact and free to use (CC0). From v0.5.4: TRANSPOSE TRACK (Shift / Ctrl + 1 / 2) and the VST effects saved in the module.</p>
         </div>
         <a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD<small><span class="js-version">v0.5.5</span> · Windows · free</small></span></a>
       </div>
@@ -689,8 +689,8 @@ footer .wrap { display: grid; gap: 8px; }
   <section id="pattern-maker">
     <div class="wrap">
       <div class="section-head">
-        <h2>PATTERN MAKER</h2>
-        <p>A program of its own that makes beats, basslines and arps for you, and saves them for Four Tracker. It is optional: tick it in the installer if you want it. Four Tracker itself doesn't change.</p>
+        <h2>PATTERN MAKER &amp; PATTERN MANAGER</h2>
+        <p>Two small programs of their own: one makes beats, basslines and arps for you, the other plays a whole song. Both are optional: tick them in the installer if you want them. Four Tracker itself doesn't change.</p>
       </div>
       <div class="download-grid">
         <figure class="shot"><img src="images/pattern-maker.jpg" alt="Four Tracker Pattern Maker: style, BPM, key and scale at the top, eight lanes of steps from kick to arp below." loading="lazy" width="1400" height="900"><figcaption><b>PATTERN MAKER</b>A drum &amp; bass pattern at 174 BPM on eight lanes.</figcaption></figure>
@@ -698,9 +698,23 @@ footer .wrap { display: grid; gap: 8px; }
           <h3>FOUR TRACKER PATTERN MAKER <span class="dim">v1.0.0</span></h3>
           <p>Pick a style, press GENERATE, and eight lanes fill up with sounds from the sample pack: kick, snare, clap, closed and open hat, percussion, bass and arp. Click the steps to change them, set key, scale, swing and how busy it is, make one lane again with NEW, and hear it with PLAY. SAVE PATTERN writes a .ftpat with its sounds, and in Four Tracker LOAD PATTERN puts it into your song.</p>
           <dl class="spec">
-            <dt>Styles</dt><dd>House, techno, drum &amp; bass, jungle, breakbeat, electro, hip hop, trance</dd>
+            <dt>Styles</dt><dd>House, techno, drum &amp; bass, jungle, breakbeat, electro, hip hop, trance, italo disco, ambient</dd>
             <dt>Saves</dt><dd>.ftpat for SONG / PATTERN &gt; LOAD PATTERN, with the sounds</dd>
             <dt>Get it</dt><dd>In the Four Tracker installer <span class="js-version">v0.5.5</span>: tick Pattern Maker under "Choose what to install" (Windows) or "Customize" (Mac)</dd>
+            <dt>Price</dt><dd>Free</dd>
+          </dl>
+          <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">GET IT WITH FOUR TRACKER<small class="js-filename">FourTracker-Setup-0.5.5-share-fx.exe</small></span></a></div>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/pattern-manager.jpg" alt="Four Tracker Pattern Manager: a song list of patterns with position, pattern, MIDI key, rows and time, and the buttons to edit it." loading="lazy" width="1100" height="760"><figcaption><b>PATTERN MANAGER</b>A song of ten positions, ready to play.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>FOUR TRACKER PATTERN MANAGER <span class="dim">v1.0.0</span></h3>
+          <p>Make a whole song without a DAW or a MIDI keyboard: put your patterns in a list in the order you want them, set the BPM, and press PLAY. It sends Four Tracker's own pattern keys over a virtual MIDI cable, and Four Tracker switches exactly at the end of each pattern, so the song stays in time. Press REC in Four Tracker first, and you have the whole song as WAV, FLAC or MP3.</p>
+          <dl class="spec">
+            <dt>Song list</dt><dd>Up / down, pattern number, rows (any length), INSERT HERE / AFTER, PLAY FROM HERE, LOOP SONG, saved as .ftsong</dd>
+            <dt>Needs</dt><dd>Windows: the free LoopBe1 or loopMIDI. Mac: nothing, it makes its own MIDI port. In Four Tracker: PATTERN SWITCH = END OF PATTERN</dd>
+            <dt>Get it</dt><dd>In the Four Tracker installer <span class="js-version">v0.5.5</span>: tick Pattern Manager</dd>
             <dt>Price</dt><dd>Free</dd>
           </dl>
           <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">GET IT WITH FOUR TRACKER<small class="js-filename">FourTracker-Setup-0.5.5-share-fx.exe</small></span></a></div>

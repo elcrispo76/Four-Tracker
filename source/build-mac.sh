@@ -59,7 +59,7 @@ JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 echo " Building Four Tracker $VERSION (this takes a while the first time) ..."
 "$CMAKE" -S . -B build-mac $GEN -DCMAKE_BUILD_TYPE=Release -DFOURTRACKER_FX_HOST=ON -DFOURTRACKER_NO_VST2=ON
 "$CMAKE" --build build-mac --config Release --parallel "$JOBS" \
-    --target FourTracker_Standalone FourTracker_AU FourTracker_VST3 FourTrackerPatternMaker
+    --target FourTracker_Standalone FourTracker_AU FourTracker_VST3 FourTrackerPatternMaker FourTrackerPatternManager
 
 # ---- collect the results -------------------------------------------------------
 ART="build-mac/FourTracker_artefacts/Release"
@@ -91,6 +91,17 @@ if [ -d "$PM_APP" ]; then
     cp -R "$PM_APP" dist-mac/root/pm/
     codesign --force --deep -s - "dist-mac/root/pm/Four Tracker Pattern Maker.app"
     HAS_PM=1
+fi
+# the Pattern Manager: also optional
+PG_ART="build-mac/FourTrackerPatternManager_artefacts/Release"
+[ -d "$PG_ART" ] || PG_ART="build-mac/FourTrackerPatternManager_artefacts"
+PG_APP="$PG_ART/Four Tracker Pattern Manager.app"
+HAS_PG=0
+if [ -d "$PG_APP" ]; then
+    mkdir -p dist-mac/root/pg
+    cp -R "$PG_APP" dist-mac/root/pg/
+    codesign --force --deep -s - "dist-mac/root/pg/Four Tracker Pattern Manager.app"
+    HAS_PG=1
 fi
 
 # "ad-hoc" signature: needed to run on Apple Silicon. Not an Apple Developer ID,
@@ -176,6 +187,11 @@ nonrelocatable() {   # $1 = root folder, $2 = plist to write
 nonrelocatable dist-mac/root/app  dist-mac/app.plist
 nonrelocatable dist-mac/root/au   dist-mac/au.plist
 nonrelocatable dist-mac/root/vst3 dist-mac/vst3.plist
+if [ "$HAS_PG" = 1 ]; then
+    nonrelocatable dist-mac/root/pg dist-mac/pg.plist
+    pkgbuild --root dist-mac/root/pg --component-plist dist-mac/pg.plist --install-location /Applications \
+             --identifier com.fourtracker.pkg.patternmanager --version "$VERSION" dist-mac/pkgs/pg.pkg
+fi
 if [ "$HAS_PM" = 1 ]; then
     nonrelocatable dist-mac/root/pm dist-mac/pm.plist
     pkgbuild --root dist-mac/root/pm --component-plist dist-mac/pm.plist --install-location /Applications \
@@ -200,12 +216,19 @@ This installs:
   - Four Tracker (the program) in Applications
   - the VST3 plugin and the Audio Unit for your music programs
   - the user manual and the Four Tracker Sample Pack (88 sounds and 44 loops, CC0) in /Users/Shared/Four Tracker and Documents/Four Tracker
-  - optional (tick it under Customize): the Pattern Maker, a program of its own that makes beats for LOAD PATTERN
+  - optional (tick them under Customize): the Pattern Maker, which makes beats for LOAD PATTERN, and the
+    Pattern Manager, which plays a whole song (a list of patterns) over MIDI
 
 Click "Customize" on the next pages to leave a part out.
 Works on Apple Silicon and Intel Macs, macOS 11 or newer. Free, beta, use it at your own risk.
 EOF
 
+PG_LINE=""; PG_CHOICE=""; PG_REF=""
+if [ "$HAS_PG" = 1 ]; then
+    PG_LINE='<line choice="patternmanager"/>'
+    PG_CHOICE='<choice id="patternmanager" start_selected="false" title="Pattern Manager (optional)" description="Plays a whole song in Four Tracker - a list of patterns - over MIDI: it makes a MIDI port of its own that Four Tracker plays from."><pkg-ref id="com.fourtracker.pkg.patternmanager"/></choice>'
+    PG_REF="<pkg-ref id=\"com.fourtracker.pkg.patternmanager\" version=\"$VERSION\" onConclusion=\"none\">pg.pkg</pkg-ref>"
+fi
 PM_LINE=""; PM_CHOICE=""; PM_REF=""
 if [ "$HAS_PM" = 1 ]; then
     PM_LINE='<line choice="patternmaker"/>'
@@ -232,17 +255,20 @@ cat > dist-mac/distribution.xml <<EOF
         <line choice="au"/>
         $EXTRAS_LINE
         $PM_LINE
+        $PG_LINE
     </choices-outline>
     <choice id="app" title="Four Tracker (the program)" description="The standalone program, in Applications. It can use your Audio Unit and VST3 effects and record your jams."><pkg-ref id="com.fourtracker.pkg.app"/></choice>
     <choice id="vst3" title="VST3 plugin" description="Four Tracker as a VST3 instrument for Ableton Live, Bitwig, Reaper, Cubase, Studio One ..."><pkg-ref id="com.fourtracker.pkg.vst3"/></choice>
     <choice id="au" title="Audio Unit plugin" description="Four Tracker as an Audio Unit instrument for Logic Pro, GarageBand, Ableton Live ..."><pkg-ref id="com.fourtracker.pkg.au"/></choice>
     $EXTRAS_CHOICE
     $PM_CHOICE
+    $PG_CHOICE
     <pkg-ref id="com.fourtracker.pkg.app" version="$VERSION" onConclusion="none">app.pkg</pkg-ref>
     <pkg-ref id="com.fourtracker.pkg.vst3" version="$VERSION" onConclusion="none">vst3.pkg</pkg-ref>
     <pkg-ref id="com.fourtracker.pkg.au" version="$VERSION" onConclusion="none">au.pkg</pkg-ref>
     $EXTRAS_REF
     $PM_REF
+    $PG_REF
 </installer-gui-script>
 EOF
 

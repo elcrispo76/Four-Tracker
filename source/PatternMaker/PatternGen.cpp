@@ -18,7 +18,7 @@ namespace
         const char* lanes[kNumLanes];      // Kick, Snare, Clap, ClosedHat, OpenHat, Perc, Bass, Arp
         int chords[4];                     // the chord (scale degree) of each bar
         bool longBass;                     // bass notes ring until the next one
-        int arpMode;                       // 0 stabs (chords), 1 up, 2 up and down, 3 bells (8ths, 2 steps long)
+        int arpMode;                       // 0 stabs (chords), 1 up, 2 up and down, 3 bells (8ths, 2 steps long), 4 long chord tones (pads)
     };
 
     const StyleDef kStyles[] = {
@@ -46,6 +46,12 @@ namespace
         { "TRANCE", 138, 0,
           { "X---X---X---X---", "----------------", "----X-------X---", "xxxxxxxxxxxxxxxx", "--X---X---X---X-", "----?-------?---", "-XXX-XXX-XXX-XXX", "XxXxXxXxXxXxXxXx" },
           { 0, 5, 2, 6 }, false, 2 },
+        { "ITALO DISCO", 120, 0,
+          { "X---X---X---X---", "----X-------X---", "----X-------X---", "x-x-x-x-x-x-x-x-", "--X---X---X---X-", "?---?---?---?---", "X-X-X-X-X-X-X-X-", "XxXxXxXxXxXxXxXx" },
+          { 0, 5, 2, 6 }, false, 1 },
+        { "AMBIENT", 90, 0,
+          { "X---------?-----", "----------------", "----------------", "...?....?...?...", "----------------", "--?-----?-----?-", "X---------------", "X-------?-------" },
+          { 0, 5, 3, 4 }, true, 4 },
     };
 
     const StyleDef& def (Style s) { return kStyles[juce::jlimit (0, (int) Style::NumStyles - 1, (int) s)]; }
@@ -128,9 +134,11 @@ namespace
                 int deg = chord;
                 const float r = rng.nextFloat();
                 const bool rolling = s.style == Style::Techno || s.style == Style::Trance;
-                if (! rolling && r < 0.18f) deg = chord + 4;            // the fifth
+                const bool octave = s.style == Style::ItaloDisco;       // italo: root on the beat, an octave up between
+                if (! rolling && ! octave && r < 0.18f) deg = chord + 4;            // the fifth
                 int semis = degreeToSemis (s.scale, deg);
-                if (rolling ? (st % 4 == 3 && r < 0.25f) : (r > 0.85f)) semis += 12;   // an octave up now and then
+                if (octave) { if (st % 4 == 2) semis += 12; }
+                else if (rolling ? (st % 4 == 3 && r < 0.25f) : (r > 0.85f)) semis += 12;   // an octave up now and then
                 stp.note = semis;
             }
             else
@@ -142,6 +150,7 @@ namespace
                     case 1:  idx = arpIndex % 4; break;
                     case 2:  { const int ud[] = { 0, 1, 2, 3, 2, 1 }; idx = ud[arpIndex % 6]; } break;
                     case 3:  idx = (arpIndex * 2) % 4; break;
+                    case 4:  idx = arpIndex % 3; break;
                     default: idx = 0; break;
                 }
                 stp.note = degreeToSemis (s.scale, chord + tones[idx]) + (d.arpMode == 1 && arpIndex % 8 >= 4 ? 12 : 0);
@@ -158,7 +167,7 @@ namespace
             while (next < steps && ! lane.steps[(size_t) next].on) ++next;
             const int gap = next - st;
             if (lane.kind == LaneKind::Bass) stp.len = d.longBass ? gap : juce::jmin (gap, 2);
-            else                             stp.len = d.arpMode == 3 ? juce::jmin (gap, 2) : 1;
+            else                             stp.len = d.arpMode == 4 ? gap : (d.arpMode == 3 ? juce::jmin (gap, 2) : 1);
         }
     }
 

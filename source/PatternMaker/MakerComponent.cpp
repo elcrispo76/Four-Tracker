@@ -53,6 +53,8 @@ juce::File SoundLibrary::defaultSound (Style style, LaneKind lane) const
         { "Kicks/KICK 808 LONG", "Snares/SNARE 808",  "Claps/CLAP 808",  "Hats/HAT 808 CLOSED", "Hats/HAT 808 OPEN",       "Percussion/COWBELL 808","Bass/BASS SQUARE C2",   "Synth/Plucks/PLUCK PULSE C4" },
         { "Kicks/KICK 808 LONG", "Snares/SNARE 808",  "Claps/CLAP SNAP", "Hats/HAT 808 CLOSED", "Hats/HAT 808 OPEN",       "Percussion/SNAP",       "Bass/BASS SUB C2",      "Synth/Plucks/KEYS SOFT C4" },
         { "Kicks/KICK TRANCE",   "Snares/SNARE TRANCE","Claps/CLAP BIG", "Hats/HAT 909 CLOSED", "Hats/HAT TRANCE OFFBEAT", "Percussion/SHAKER",     "Bass/BASS ROLLING C2",  "Synth/Plucks/PLUCK TRANCE C4" },
+        { "Kicks/KICK ITALO",    "Snares/SNARE ITALO", "Claps/CLAP 808",  "Hats/HAT 808 CLOSED", "Hats/HAT 808 OPEN",       "Percussion/TAMBOURINE", "Bass/BASS 80S C2",      "Synth/Plucks/PLUCK 80S C4" },
+        { "Kicks/KICK SOFT",     "Snares/SNARE 808",  "Claps/CLAP SNAP", "Hats/HAT PEDAL",      "Hats/HAT 808 OPEN",       "Percussion/SHAKER",     "Bass/BASS SUB C2",      "Synth/Pads/PAD JUNO C3" },
     };
     String rel = table[jlimit (0, (int) Style::NumStyles - 1, (int) style)][(int) lane];
     if (! rel.startsWith ("Bass/") && ! rel.startsWith ("Synth/")) rel = "Drums/" + rel;

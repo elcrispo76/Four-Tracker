@@ -32,6 +32,8 @@
 #define HasApp32    FileExists(Dist32 + AppExe)
 #define PmExe       "Four Tracker Pattern Maker.exe"
 #define HasPatternMaker FileExists(Dist64 + PmExe)
+#define PgExe       "Four Tracker Pattern Manager.exe"
+#define HasPatternManager FileExists(Dist64 + PgExe)
 #define HasVst3_64  DirExists(Dist64 + "Four Tracker.vst3")
 #define HasVst3_32  DirExists(Dist32 + "Four Tracker.vst3")
 ; SHARE = the version you give to others: never includes VST2 (Steinberg's
@@ -108,6 +110,9 @@ Name: "vst2_32"; Description: "VST2 plugin, 32-bit (for 32-bit hosts such as old
 #if HasPatternMaker
 Name: "patternmaker"; Description: "Pattern Maker (optional): a program of its own that makes beats, basslines and arps for LOAD PATTERN"
 #endif
+#if HasPatternManager
+Name: "patternmanager"; Description: "Pattern Manager (optional): plays a whole song - a list of patterns - over a virtual MIDI cable (LoopBe1 / loopMIDI)"
+#endif
 #if HasSamples
 Name: "samples"; Description: "Four Tracker Sample Pack (88 sounds and 44 loops, CC0) in Documents\Four Tracker\Samples"; Types: full app app32
 #endif
@@ -119,6 +124,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#Dist64}{#AppExe}"; DestDir: "{app}"; Components: app; Flags: ignoreversion
 #if HasPatternMaker
 Source: "{#Dist64}{#PmExe}"; DestDir: "{app}"; Components: patternmaker; Flags: ignoreversion
+#endif
+#if HasPatternManager
+Source: "{#Dist64}{#PgExe}"; DestDir: "{app}"; Components: patternmanager; Flags: ignoreversion
 #endif
 #if HasApp32
 Source: "{#Dist32}{#AppExe}"; DestDir: "{app}\32-bit"; Components: app32; Flags: ignoreversion
@@ -156,6 +164,9 @@ Name: "{group}\{#AppName} Sample Pack"; Filename: "{userdocs}\Four Tracker\Sampl
 #endif
 #if HasPatternMaker
 Name: "{group}\{#AppName} Pattern Maker"; Filename: "{app}\{#PmExe}"; Components: patternmaker
+#endif
+#if HasPatternManager
+Name: "{group}\{#AppName} Pattern Manager"; Filename: "{app}\{#PgExe}"; Components: patternmanager
 #endif
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; Components: app

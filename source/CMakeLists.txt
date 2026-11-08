@@ -237,8 +237,9 @@ if(FOURTRACKER_BUILD_TESTS)
     juce_add_console_app(FourTrackerTests PRODUCT_NAME "FourTrackerTests")
     get_target_property(FT_SOURCES FourTracker SOURCES)
     list(FILTER FT_SOURCES INCLUDE REGEX "^Source/")
-    target_sources(FourTrackerTests PRIVATE Tests/EngineTest.cpp ${FT_SOURCES} PatternMaker/PatternGen.cpp PatternMaker/MakerComponent.cpp)
-    target_include_directories(FourTrackerTests PRIVATE Source PatternMaker)
+    target_sources(FourTrackerTests PRIVATE Tests/EngineTest.cpp ${FT_SOURCES} PatternMaker/PatternGen.cpp PatternMaker/MakerComponent.cpp
+        PatternManager/SongList.cpp PatternManager/ManagerComponent.cpp)
+    target_include_directories(FourTrackerTests PRIVATE Source PatternMaker PatternManager)
     target_compile_definitions(FourTrackerTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1 JUCE_USE_FLAC=1 JUCE_USE_OGGVORBIS=1 JUCE_MODAL_LOOPS_PERMITTED=1)
     if(FOURTRACKER_FX_HOST)
@@ -287,5 +288,29 @@ if(FOURTRACKER_BUILD_PATTERN_MAKER)
     endif()
     target_link_libraries(FourTrackerPatternMaker PRIVATE ft_lame
         juce::juce_audio_utils juce::juce_audio_formats juce::juce_audio_devices juce::juce_audio_processors
-        juce::juce_recommended_config_flags juce::juce_recommended_lto_flags)
+        juce::juce_recommended_config_flags)   # no LTO: much less memory when it is built
+endif()
+
+# Four Tracker Pattern Manager: a program of its own that plays a whole song in Four Tracker - a list of
+# patterns sent as Four Tracker's pattern keys over a virtual MIDI cable (LoopBe1 / loopMIDI). Small: no engine.
+option(FOURTRACKER_BUILD_PATTERN_MANAGER "Build the Pattern Manager program" ON)
+if(FOURTRACKER_BUILD_PATTERN_MANAGER)
+    juce_add_gui_app(FourTrackerPatternManager
+        PRODUCT_NAME "Four Tracker Pattern Manager"
+        COMPANY_NAME "elcrispo76"
+        BUNDLE_ID com.fourtracker.patternmanager
+        VERSION 1.0.0
+        ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon_1024.png")
+    target_sources(FourTrackerPatternManager PRIVATE
+        PatternManager/Main.cpp PatternManager/SongList.cpp PatternManager/ManagerComponent.cpp Source/UI/Widgets.cpp)
+    target_include_directories(FourTrackerPatternManager PRIVATE Source PatternManager)
+    target_compile_definitions(FourTrackerPatternManager PRIVATE
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_DISPLAY_SPLASH_SCREEN=0
+        JUCE_APPLICATION_NAME_STRING="Four Tracker Pattern Manager" JUCE_APPLICATION_VERSION_STRING="1.0.0")
+    if(FOURTRACKER_HEADLESS_CHECK)
+        target_compile_definitions(FourTrackerPatternManager PRIVATE
+            JUCE_ALSA=0 JUCE_JACK=0 JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0)
+    endif()
+    target_link_libraries(FourTrackerPatternManager PRIVATE
+        juce::juce_gui_basics juce::juce_audio_devices juce::juce_recommended_config_flags)
 endif()

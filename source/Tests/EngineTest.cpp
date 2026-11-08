@@ -15,6 +15,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "MakerComponent.h"
+#include "ManagerComponent.h"
 
 using namespace juce;
 
@@ -3279,8 +3280,21 @@ int main (int argc, char** argv)
                 for (auto& stp : p.lanes[6].steps)
                     if (stp.on && std::find (sc.begin(), sc.end(), ((stp.note % 12) + 12) % 12) == sc.end()) bassInScale = false;
             }
-        CHECK (kicksOk && lanesOk, "PATTERN MAKER: every style has a kick on the one (8 styles x 5)");
+        CHECK (kicksOk && lanesOk, "PATTERN MAKER: every style has a kick on the one (" + String ((int) Style::NumStyles) + " styles x 5)");
         CHECK (bassInScale, "PATTERN MAKER: bass notes stay in the scale");
+        {
+            Settings it; it.style = Style::ItaloDisco; it.seed = 9;
+            const auto p = generate (it);
+            bool octaves = true; int hits = 0;
+            for (int st = 0; st < 16; ++st)
+                if (p.lanes[6].steps[(size_t) st].on) { ++hits; if ((st % 4 == 2) != (p.lanes[6].steps[(size_t) st].note >= 12)) octaves = false; }
+            Settings am; am.style = Style::Ambient; am.seed = 9;
+            const auto a2 = generate (am);
+            int arpLongest = 0; for (auto& stp : a2.lanes[7].steps) if (stp.on) arpLongest = jmax (arpLongest, stp.len);
+            CHECK (hits == 8 && octaves && styleName (Style::ItaloDisco) == "ITALO DISCO" && defaultBpm (Style::ItaloDisco) == 120,
+                   "PATTERN MAKER: ITALO DISCO at 120 BPM with the octave bass (root on the beat, octave between)");
+            CHECK (defaultBpm (Style::Ambient) == 90 && ! a2.lanes[1].on && ! a2.lanes[2].on && arpLongest >= 8, "PATTERN MAKER: AMBIENT at 90 BPM: no snare or clap, long pad notes (" + String (arpLongest) + " steps)");
+        }
 
         AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
         auto pmProc = std::make_unique<FourTrackerProcessor>();
@@ -3342,6 +3356,96 @@ int main (int argc, char** argv)
             CHECK (! p2->getInstrument (1).isEmpty() && p2->getInstrument (1).name == "KICK.WAV", "PATTERN MAKER: without the pack it uses the built-in sounds");
         }
         pmProc.reset();
+    }
+
+    // ===================================================================
+    // PATTERN MANAGER: the song's keys, sent to Four Tracker, play the patterns in order
+    // ===================================================================
+    {
+        using namespace pmgr;
+        Song song;
+        song.bpm = 125; song.speed = 6;
+        song.entries = { { 0, 64 }, { 1, 64 }, { 1, 64 }, { 2, 32 }, { 0, 64 } };
+        const auto ev = schedule (song, 0);
+        CHECK (ev.size() == 6 && ev[0].note == 37 && ev[1].note == 36 && ev.back().stop && std::abs (ev.back().time - song.totalSeconds()) < 1e-9,
+               "PATTERN MANAGER: the keys for the song (pattern 00 = C#2, start, 3 switches, stop)");
+        CHECK (std::abs (song.rowSeconds() - 0.12) < 1e-9 && std::abs (song.totalSeconds() - 288 * 0.12) < 1e-6, "PATTERN MANAGER: 125 BPM, SPEED 6 = 0.12 s a row");
+        CHECK (midiNoteName (36) == "C-2" && midiNoteName (37) == "C#2", "PATTERN MANAGER: note names like Four Tracker");
+        Song back;
+        CHECK (back.fromVar (JSON::parse (JSON::toString (song.toVar()))) && back.entries.size() == 5 && back.entries[3].rows == 32, "PATTERN MANAGER: the song list saves and loads");
+
+        // play it through a real Four Tracker engine, the keys at the right samples
+        AudioProcessor::setTypeOfNextNewPlugin (AudioProcessor::wrapperType_Undefined);
+        auto ft = std::make_unique<FourTrackerProcessor>();
+        auto& e = ft->getEngine();
+        e.switchMode = (int) ft::SwitchMode::EndOfPattern;
+        e.bpm = 125; e.speed = 6;
+        { const ScopedLock sl (e.getDataLock()); for (int p = 0; p < 3; ++p) e.getPattern (p).numRows = p == 2 ? 32 : 64; }
+        const double sr = 44100.0;
+        ft->prepareToPlay (sr, 256);
+        std::vector<std::pair<int64, MidiMessage>> midi;
+        for (auto& k : ev)
+        {
+            const auto at = (int64) (k.time * sr) + 300;     // a little late, as over a virtual cable
+            midi.push_back ({ at, MidiMessage::noteOn (1, k.note, (uint8) 100) });
+            midi.push_back ({ at + (int64) (0.04 * sr), MidiMessage::noteOff (1, k.note) });
+        }
+        std::vector<int> played;
+        int lastRow = -1; bool wasPlaying = false, stoppedAtEnd = false;
+        const int64 total = (int64) ((song.totalSeconds() + 1.0) * sr);
+        for (int64 pos = 0; pos < total; pos += 256)
+        {
+            AudioBuffer<float> buf (2, 256);
+            MidiBuffer mb;
+            for (auto& [at, m] : midi) if (at >= pos && at < pos + 256) mb.addEvent (m, (int) (at - pos));
+            ft->processBlock (buf, mb);
+            const bool pl = e.playing.load();
+            const int row = e.playRow.load();
+            if (pl && (row < lastRow || ! wasPlaying)) played.push_back (e.playPattern.load());   // a pattern started from the top
+            if (wasPlaying && ! pl) stoppedAtEnd = std::abs ((double) pos / sr - song.totalSeconds()) < 0.2;
+            lastRow = pl ? row : -1;
+            wasPlaying = pl;
+        }
+        String got; for (int p : played) got << p << " ";
+        CHECK (played == std::vector<int> ({ 0, 1, 1, 2, 0 }), "PATTERN MANAGER: Four Tracker plays 00 01 01 02 00 in order (" + got.trim() + ")");
+        CHECK (stoppedAtEnd && ! e.playing.load(), "PATTERN MANAGER: and stops at the end of the song");
+        ft.reset();
+
+        // the window: arrows, INSERT HERE / AFTER, the pattern number
+        ManagerComponent mc;
+        auto& ms = mc.getSong();
+        ms.entries = { { 0, 64 } };
+        mc.changePattern (1); mc.changePattern (1);
+        mc.insertAfter();                 // 02, 02
+        mc.changePattern (1);             // 02, 03
+        mc.moveSelection (-1);
+        mc.insertHere();                  // 02, 02, 03  (selected stays 0)
+        mc.changePattern (-2);            // 00, 02, 03
+        mc.moveSelection (5);             // the last one
+        mc.changeRows (-1);               // 03 with 48 rows
+        String list; for (auto& x : ms.entries) list << x.pattern << "/" << x.rows << " ";
+        {
+            auto keep = ms.entries;
+            mc.setRows (100);
+            const bool exact = ms.entries[2].rows == 100 && std::abs (ms.entrySeconds (2) - 100 * ms.rowSeconds()) < 1e-9;
+            mc.setRows (999);
+            CHECK (exact && ms.entries[2].rows == 256, "PATTERN MANAGER: any pattern length 1 - 256 (100 rows = " + String (ms.entrySeconds (2), 2) + " s at " + String (ms.bpm) + " BPM SPEED " + String (ms.speed) + ")");
+            ms.entries = keep;
+        }
+        CHECK (ms.entries.size() == 3 && ms.entries[0].pattern == 0 && ms.entries[1].pattern == 2 && ms.entries[2].pattern == 3 && ms.entries[2].rows == 48
+               && mc.getSelected() == 2, "PATTERN MANAGER: arrows, INSERT HERE, INSERT AFTER (" + list.trim() + ")");
+        if (screens)
+        {
+            ms.entries = { { 0, 64 }, { 0, 64 }, { 1, 64 }, { 2, 64 }, { 1, 64 }, { 3, 32 }, { 4, 64 }, { 4, 64 }, { 5, 64 }, { 0, 64 } };
+            ms.bpm = 174;
+            mc.moveSelection (-10); mc.moveSelection (3);
+            mc.resized();
+            auto img = mc.createComponentSnapshot (mc.getLocalBounds(), true, 1.0f);
+            auto file = outDir.getChildFile ("31_pattern_manager.png");
+            file.deleteFile();
+            FileOutputStream fos (file);
+            PNGImageFormat().writeImageToStream (img, fos);
+        }
     }
 
     proc.reset();

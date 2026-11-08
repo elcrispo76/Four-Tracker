@@ -5,15 +5,15 @@ Mapperne ligger præcis som i dit Four-Tracker repo. Ingen filer skal slettes.
 
 1. KODEN
    Gå ind i mappen source i repoet > Add file > Upload files.
-   Træk alt fra source-mappen i zippen ind: mapperne Source, Tests, installer, PatternMaker
+   Træk alt fra source-mappen i zippen ind: mapperne Source, Tests, installer, PatternMaker, PatternManager
    og filerne CMakeLists.txt, BUILDING-AND-USAGE.md, build-windows.bat og build-mac.sh.
-   (Over 100 filer? Tag Source + PatternMaker først, så resten.) Commit.
+   (Over 100 filer? Tag Source først, så resten.) Commit.
 
 2. RELEASE
    Byg på din PC fra FourTracker-v75.zip som altid (valg 4: FX share).
-   Pattern Maker bygges med og kommer i installeren som et frivilligt valg.
+   Pattern Maker og Pattern Manager bygges med og kommer i installeren som frivillige valg.
    Releases > Draft a new release > tag v0.5.5 > upload FourTracker-Setup-0.5.5-share-fx.exe > Publish.
    Actions > "Mac build" > Run workflow > v0.5.5.
 
 3. HJEMMESIDE + MANUAL (roden af repoet)
-   index.html og Four-Tracker-User-Manual.pdf i roden, images/course-part2.jpg i images. Efter releasen.
+   index.html og Four-Tracker-User-Manual.pdf i roden, images/course-part2.jpg, pattern-maker.jpg og pattern-manager.jpg i images. Efter releasen.
