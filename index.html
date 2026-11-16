@@ -23,7 +23,7 @@
   "description": "Free sample tracker (music tracker) for Windows in the style of ProTracker, FastTracker 2 and OctaMED, with live pattern switching from a MIDI keyboard, a built-in synth and VST3 effects. Standalone app and VST3 plugin.",
   "applicationCategory": "MultimediaApplication",
   "applicationSubCategory": "Music tracker",
-  "operatingSystem": "Windows 10, Windows 11",
+  "operatingSystem": "Windows 10, Windows 11, macOS 11 or newer",
   "softwareVersion": "0.5.5",
   "url": "https://elcrispo76.github.io/Four-Tracker/",
   "downloadUrl": "https://github.com/elcrispo76/Four-Tracker/releases",
@@ -364,14 +364,14 @@ footer .wrap { display: grid; gap: 8px; }
         <h1>FOUR TRACKER</h1>
         <p class="lede">A free sample tracker in the style of ProTracker and FastTracker 2, with 1 to 16 tracks, that you play live: every key on your MIDI keyboard is a pattern.</p>
         <div class="actions">
-          <a class="btn btn-red js-download" href="#download">
-            <span class="btn-text">DOWNLOAD<small>Windows · free · <span class="js-version">v0.5.5</span> beta</small></span>
+          <a class="btn btn-red" href="#download">
+            <span class="btn-text">DOWNLOAD<small>Windows · Mac · free · <span class="js-version">v0.5.5</span> beta</small></span>
           </a>
           <a class="btn btn-light js-donate" href="#donate">
             <span class="btn-text">DONATE<small>Keep it going</small></span>
           </a>
         </div>
-        <p class="meta">Standalone app with ASIO and VST3 effects, and a VST3 plugin for your DAW. Windows 10/11, 64-bit and 32-bit.</p>
+        <p class="meta">Standalone app with ASIO and VST3 effects, and a VST3 plugin for your DAW. Windows 10/11 (64-bit and 32-bit) and Mac (macOS 11+, also as an Audio Unit).</p>
       </div>
       <div class="bezel">
         <img src="images/tracks.jpg" alt="Four Tracker, a free music tracker for Windows: channel strips with VST effects above a pattern with notes, instruments and effects." width="1536" height="1024">
@@ -394,7 +394,7 @@ footer .wrap { display: grid; gap: 8px; }
           </div>
           <p><b>Also new:</b> <b>64 instrument slots</b> (four banks of 16, so LOAD PATTERN has room for a pattern's sounds), the optional <a href="#pattern-maker">PATTERN MAKER</a> (beats, basslines and arps for LOAD PATTERN, now with 16 lanes, a SLICER for long samples, and REC to play a pattern in on MIDI pads or keys to a metronome) and <a href="#pattern-maker">PATTERN MANAGER</a> (a whole song from a list of patterns, no DAW needed), a 16-track MIXER (Shift+M or MIX) with peak meters, CLIP lamps that light when a track goes into the red, and a fader for every track. SAVE on Sample Edit saves a sample as WAV or AIFF (your MIX and RE-SAMPLE loops, with their loop points), and the sample pack now has 44 loops: DnB, breakbeats, techno and house beats, basslines, arps and chords, tempo-exact and free to use (CC0). From v0.5.4: TRANSPOSE TRACK (Shift / Ctrl + 1 / 2) and the VST effects saved in the module.</p>
         </div>
-        <a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD<small><span class="js-version">v0.5.5</span> · Windows · free</small></span></a>
+        <a class="btn btn-red" href="#download"><span class="btn-text">DOWNLOAD<small><span class="js-version">v0.5.5</span> · Windows · Mac · free</small></span></a>
       </div>
     </div>
   </section>
@@ -574,11 +574,11 @@ footer .wrap { display: grid; gap: 8px; }
     <div class="wrap">
       <div class="section-head">
         <h2>DOWNLOAD</h2>
-        <p>Free. One installer for the app, the VST3 plugin, the user manual and the sample pack.</p>
+        <p>Free, for Windows and Mac. One installer for the app, the plugin, the user manual and the sample pack.</p>
       </div>
       <div class="download-grid">
         <div class="panel dl-card">
-          <h3>FOUR TRACKER <span class="js-version">v0.5.5</span> <span class="badge">BETA</span></h3>
+          <h3>FOUR TRACKER FOR WINDOWS <span class="js-version">v0.5.5</span> <span class="badge">BETA</span></h3>
           <dl class="spec">
             <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
             <dt>Includes</dt><dd>Standalone app (ASIO, Windows Audio / WASAPI, DirectSound) with VST3 effects, VST3 plugin 64-bit and 32-bit, user manual (PDF), Four Tracker Sample Pack (88 WAV sounds and 44 loops, free to use in your music)</dd>
@@ -589,11 +589,25 @@ footer .wrap { display: grid; gap: 8px; }
           <p class="note">Windows may say "Windows protected your PC" because the installer isn't signed. Click <b>More info</b>, then <b>Run anyway</b>.</p>
         </div>
         <div class="panel dl-card">
+          <h3>FOUR TRACKER FOR MAC <span class="js-version">v0.5.5</span> <span class="badge">BETA</span></h3>
+          <dl class="spec">
+            <dt>System</dt><dd>macOS 11 or newer, Apple Silicon and Intel in one</dd>
+            <dt>Includes</dt><dd>Four Tracker.app (Core Audio) with AU and VST3 effects, the plugin as VST3 and Audio Unit (Logic, GarageBand ...), user manual (PDF), Four Tracker Sample Pack</dd>
+            <dt>Optional</dt><dd>Pattern Maker and Pattern Manager: tick them under <b>Customize</b></dd>
+            <dt>Price</dt><dd>Free</dd>
+          </dl>
+          <div><a class="btn btn-red js-mac-download" href="#download"><span class="btn-text">DOWNLOAD FOR MAC<small class="js-mac-filename">FourTracker-0.5.5-mac.pkg</small></span></a></div>
+          <p class="note">The installer isn't signed by Apple. If the Mac won't open it: <b>System Settings &gt; Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</p>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <div class="panel dl-card">
           <h3>USER MANUAL</h3>
           <p>Getting started, the live keyboard, every page, the full effect list and keyboard shortcuts, in 19 pages.</p>
           <div><a class="btn btn-light js-manual" href="Four-Tracker-User-Manual.pdf"><span class="btn-text">READ THE MANUAL<small>PDF · English</small></span></a></div>
-          <p class="note">First start: the app opens with a demo song and puts it in Documents\Four Tracker\Demo together with the demo samples. The sample pack goes to Documents\Four Tracker\Samples.</p>
+          <p class="note">First start: the app opens with a demo song and puts it in Documents\Four Tracker\Demo together with the demo samples. The sample pack goes to Documents\Four Tracker\Samples (on a Mac: Documents/Four Tracker).</p>
         </div>
+        <div></div>
       </div>
     </div>
   </section>
@@ -796,6 +810,8 @@ const SITE = {
   // Where the installer is hosted, e.g. a GitHub release:
   // "https://github.com/YOUR-NAME/four-tracker/releases/latest/download/FourTracker-Setup-0.5.5-share-fx.exe"
   download: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.5.5/FourTracker-Setup-0.5.5-share-fx.exe",
+  // The Mac installer (from the "Mac build" GitHub Action), in the same release:
+  macDownload: "https://github.com/elcrispo76/Four-Tracker/releases/download/v0.5.5/FourTracker-0.5.5-mac.pkg",
   // Your donation page, e.g. "https://ko-fi.com/YOUR-NAME" or "https://www.paypal.me/YOUR-NAME"
   donate:   "https://ko-fi.com/fourtracker",
   donateLabel: "Any amount",
@@ -813,6 +829,8 @@ const SITE = {
   document.querySelectorAll(".js-donate-label").forEach(el => el.textContent = SITE.donateLabel);
   const ext = (el, url) => { if (!url) return; el.href = url; el.target = "_blank"; el.rel = "noopener"; };
   document.querySelectorAll(".js-download").forEach(el => SITE.download ? ext(el, SITE.download) : null);
+  document.querySelectorAll(".js-mac-download").forEach(el => SITE.macDownload ? ext(el, SITE.macDownload) : null);
+  document.querySelectorAll(".js-mac-filename").forEach(el => el.textContent = decodeURIComponent (SITE.macDownload.split("/").pop()));
   document.querySelectorAll(".js-donate").forEach(el => SITE.donate ? ext(el, SITE.donate) : null);
   document.querySelectorAll(".js-manual").forEach(el => { el.href = SITE.manual; });
   document.querySelectorAll(".js-bundle-version").forEach(el => el.textContent = "v" + SITE.bundleVersion);
