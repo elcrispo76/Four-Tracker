@@ -392,7 +392,7 @@ footer .wrap { display: grid; gap: 8px; }
             <span class="cell">ENTER &nbsp;WRITE AT CURSOR</span>
             <span class="cell">POP OUT &nbsp;CHART WINDOW</span>
           </div>
-          <p><b>Also new:</b> the optional <a href="#pattern-maker">PATTERN MAKER</a> (beats, basslines and arps for LOAD PATTERN) and <a href="#pattern-maker">PATTERN MANAGER</a> (a whole song from a list of patterns, no DAW needed), a 16-track MIXER (Shift+M or MIX) with peak meters, CLIP lamps that light when a track goes into the red, and a fader for every track. SAVE on Sample Edit saves a sample as WAV or AIFF (your MIX and RE-SAMPLE loops, with their loop points), and the sample pack now has 44 loops: DnB, breakbeats, techno and house beats, basslines, arps and chords, tempo-exact and free to use (CC0). From v0.5.4: TRANSPOSE TRACK (Shift / Ctrl + 1 / 2) and the VST effects saved in the module.</p>
+          <p><b>Also new:</b> <b>64 instrument slots</b> (four banks of 16, so LOAD PATTERN has room for a pattern's sounds), the optional <a href="#pattern-maker">PATTERN MAKER</a> (beats, basslines and arps for LOAD PATTERN, now with 16 lanes, a SLICER for long samples, and REC to play a pattern in on MIDI pads or keys to a metronome) and <a href="#pattern-maker">PATTERN MANAGER</a> (a whole song from a list of patterns, no DAW needed), a 16-track MIXER (Shift+M or MIX) with peak meters, CLIP lamps that light when a track goes into the red, and a fader for every track. SAVE on Sample Edit saves a sample as WAV or AIFF (your MIX and RE-SAMPLE loops, with their loop points), and the sample pack now has 44 loops: DnB, breakbeats, techno and house beats, basslines, arps and chords, tempo-exact and free to use (CC0). From v0.5.4: TRANSPOSE TRACK (Shift / Ctrl + 1 / 2) and the VST effects saved in the module.</p>
         </div>
         <a class="btn btn-red js-download" href="#download"><span class="btn-text">DOWNLOAD<small><span class="js-version">v0.5.5</span> · Windows · free</small></span></a>
       </div>
@@ -537,7 +537,7 @@ footer .wrap { display: grid; gap: 8px; }
         <article class="panel feature">
           <span class="cell">S ▸ LOOP ◂ E</span>
           <h3>Sample editor</h3>
-          <p>Start, end and loop points, ping-pong and reverse, cut, paste, fades, normalize and OctaMED-style MIX of two samples. Ctrl+A / C / X / V. 16 instrument slots.</p>
+          <p>Start, end and loop points, ping-pong and reverse, cut, paste, fades, normalize and OctaMED-style MIX of two samples. Ctrl+A / C / X / V. 64 instrument slots in four banks of 16.</p>
         </article>
         <article class="panel feature">
           <span class="cell">CTRL+F3 F4 F5</span>
@@ -561,7 +561,7 @@ footer .wrap { display: grid; gap: 8px; }
       </div>
       <div class="shots">
         <figure class="shot"><img src="images/tracks.jpg" alt="Four Tracker main view with channel strips, VST effect lists and the pattern." loading="lazy" width="1536" height="1024"><figcaption><b>TRACKS</b>1 to 16 tracks with level, pan, pitch and VST effects.</figcaption></figure>
-        <figure class="shot"><img src="images/instruments.jpg" alt="Instruments page with the sample list and settings." loading="lazy" width="1536" height="1024"><figcaption><b>INSTRUMENTS</b>16 slots, volume, transpose, loop.</figcaption></figure>
+        <figure class="shot"><img src="images/instruments.jpg" alt="Instruments page with the sample list and settings." loading="lazy" width="1536" height="1024"><figcaption><b>INSTRUMENTS</b>64 slots in four banks, volume, transpose, loop.</figcaption></figure>
         <figure class="shot"><img src="images/sample-edit.jpg" alt="Sample editor with a waveform, markers and edit tools." loading="lazy" width="1536" height="1024"><figcaption><b>SAMPLE EDIT</b>Markers, loops, fades and zoom.</figcaption></figure>
         <figure class="shot"><img src="images/song-pattern.jpg" alt="Song and pattern page with transport and module buttons." loading="lazy" width="1536" height="1024"><figcaption><b>SONG / PATTERN</b>Start, stop, new, load and save modules.</figcaption></figure>
         <figure class="shot"><img src="images/block.jpg" alt="Block page with track and block operations." loading="lazy" width="1536" height="1024"><figcaption><b>BLOCK</b>Cut, copy, paste tracks and patterns.</figcaption></figure>
@@ -693,17 +693,32 @@ footer .wrap { display: grid; gap: 8px; }
         <p>Two small programs of their own: one makes beats, basslines and arps for you, the other plays a whole song. Both are optional: tick them in the installer if you want them. Four Tracker itself doesn't change.</p>
       </div>
       <div class="download-grid">
-        <figure class="shot"><img src="images/pattern-maker.jpg" alt="Four Tracker Pattern Maker: style, BPM, key and scale at the top, eight lanes of steps from kick to arp below." loading="lazy" width="1400" height="900"><figcaption><b>PATTERN MAKER</b>A drum &amp; bass pattern at 174 BPM on eight lanes.</figcaption></figure>
+        <figure class="shot"><img src="images/pattern-maker.jpg" alt="Four Tracker Pattern Maker: style, BPM, key and scale at the top, the lanes from kick to arp in the middle, and the BLANK, REC, COUNT-IN, METRO, DOUBLE and INPUT buttons below." loading="lazy" width="1400" height="900"><figcaption><b>PATTERN MAKER</b>A drum &amp; bass pattern at 174 BPM, with REC and the pads below.</figcaption></figure>
         <div class="panel dl-card">
-          <h3>FOUR TRACKER PATTERN MAKER <span class="dim">v1.0.0</span></h3>
+          <h3>FOUR TRACKER PATTERN MAKER <span class="dim">v1.4.2</span></h3>
           <p>Pick a style, press GENERATE, and eight lanes fill up with sounds from the sample pack: kick, snare, clap, closed and open hat, percussion, bass and arp. Click the steps to change them, set key, scale, swing and how busy it is, make one lane again with NEW, and hear it with PLAY. SAVE PATTERN writes a .ftpat with its sounds, and in Four Tracker LOAD PATTERN puts it into your song.</p>
+          <p>Or start from nothing: <b>BLANK</b> empties the lanes, <b>REC</b> counts you in with one bar of the metronome, and you play the pattern in on a MIDI pad controller or keyboard. Every hit lands on the nearest 16th, round and round, so you can add the kick, then the snare, then the hats. <b>DOUBLE</b> makes 1 bar 2, and 2 bars 4.</p>
           <dl class="spec">
             <dt>Styles</dt><dd>House, techno, drum &amp; bass, jungle, breakbeat, electro, hip hop, trance, italo disco, ambient</dd>
+            <dt>Lanes</dt><dd>16: the style's 8 (KICK/SLICE ... ARP/SLICE) and 8 of your own (EMPTY/SLICE 9-16), in two tabs</dd>
+            <dt>Record</dt><dd>REC with a 1 bar count-in, METRO, VELOCITY, UNDO, DOUBLE. INPUT: DRUM PADS (pads 1-16, e.g. an Arturia BeatStep) or KEYBOARD (drums on the General MIDI keys, bass or arp on the rest), LEARN for your own pads</dd>
             <dt>Saves</dt><dd>.ftpat for SONG / PATTERN &gt; LOAD PATTERN, with the sounds</dd>
             <dt>Get it</dt><dd>In the Four Tracker installer <span class="js-version">v0.5.5</span>: tick Pattern Maker under "Choose what to install" (Windows) or "Customize" (Mac)</dd>
             <dt>Price</dt><dd>Free</dd>
           </dl>
           <div><a class="btn btn-red js-download" href="#download"><span class="btn-text">GET IT WITH FOUR TRACKER<small class="js-filename">FourTracker-Setup-0.5.5-share-fx.exe</small></span></a></div>
+        </div>
+      </div>
+      <div class="download-grid fx-second">
+        <figure class="shot"><img src="images/slicer.jpg" alt="The Pattern Maker's SLICER: a breakbeat cut into 12 slices on the waveform, and 16 pads below, four of them ticked for the lanes." loading="lazy" width="1240" height="780"><figcaption><b>SLICER</b>A funky break cut at every hit, four slices on their way to lanes 9-12.</figcaption></figure>
+        <div class="panel dl-card">
+          <h3>THE SLICER <span class="dim">in the Pattern Maker</span></h3>
+          <p>Load a long sample (voices, a beat, a whole loop) and the SLICER cuts it into slices: at every hit (AUTO, with a sensitivity), on a grid of the BPM (GRID: 1 bar down to a 16th), or by hand. It finds the BPM itself, from the file name or from the loop's length, and puts the Pattern Maker at the same tempo. Play the slices on your pads or keys, tick the ones you want, and GENERATE SAMPLE LIST puts them on the lanes as WAVs of their own.</p>
+          <dl class="spec">
+            <dt>Slices</dt><dd>Up to 64, on pages of 16 pads; double-click to cut, drag to move a cut, right-click to remove one</dd>
+            <dt>Onto</dt><dd>The empty lanes 9-16 first; more than 8 go on from lane 16 down, so the kick and the first sounds stay. Any lane can take a sample of your own again</dd>
+            <dt>Metronome</dt><dd>Its own sound, not a lane: it counts in and clicks even with all 16 lanes full, and is never saved</dd>
+          </dl>
         </div>
       </div>
       <div class="download-grid fx-second">
