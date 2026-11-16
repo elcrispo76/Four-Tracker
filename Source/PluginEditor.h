@@ -1,56 +1,119 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Breakbeat Processor - Copyright (C) 2026 elcrispo76
+// Four Tracker - Copyright (C) 2026 elcrispo76
 
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <set>
+#include <map>
 #include "PluginProcessor.h"
+#include "UI/EditorState.h"
+#include "UI/HeaderBar.h"
+#include "UI/Pages.h"
+#include "UI/Mixer.h"
+#include "UI/SettingsPage.h"
+#include "UI/SampleBrowser.h"
+#include "UI/FxPage.h"
+#include "UI/TrackCount.h"
+#include "UI/MasterVolume.h"
+#include "UI/RecBar.h"
+#include "UI/TrackNav.h"
 
-class BreakbeatEditor : public juce::AudioProcessorEditor, public juce::Timer
+/** Everything is laid out in the 1536 x 1024 coordinates of the mockups
+    and scaled to the window size. */
+class DesignRoot : public juce::Component
 {
 public:
-    explicit BreakbeatEditor (BreakbeatProcessor&);
-    ~BreakbeatEditor() override;
+    void paint (juce::Graphics& g) override { g.fillAll (Theme::background); }
+};
+
+class FourTrackerEditor : public juce::AudioProcessorEditor,
+                          public juce::FileDragAndDropTarget,
+                          private juce::Timer,
+                          private juce::ChangeListener
+{
+public:
+    explicit FourTrackerEditor (FourTrackerProcessor&);
+    ~FourTrackerEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool isKeyDown) override;
+    void focusLost (FocusChangeType) override;
 
-    // used by the parts
-    int  getStepAction (int step) const;
-    void setStepAction (int step, int action);
-    int  getBrush() const noexcept { return brush; }
-    void setBrush (int action);
-    void stepPressed (int step, const juce::MouseEvent&);
-    void stepDragged (const juce::MouseEvent&);
-    void showStepMenu (int step);
-    int  getPlayingStep() const noexcept { return playing; }
-    /** Rows (16th notes) per step: 1, 2, 4 or 8. */
-    int  getRowsPerStep() const;
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
-    struct StepPad;
-    struct ToolButton;
-    struct Knob;
+    static constexpr int kDesignW = 1536, kDesignH = 1024;
 
 private:
+    enum class Page { Tracks, Instruments, SampleEdit, Song, Block, Settings };
+
+    void showPage (Page p);
     void timerCallback() override;
-    void randomise();
-    void showPatternMenu();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void refreshAll();
 
-    BreakbeatProcessor& proc;
-    juce::OwnedArray<StepPad> pads;
-    juce::OwnedArray<ToolButton> tools;
-    std::unique_ptr<ToolButton> clearButton, randomButton, patternButton, aheadButton;
-    std::unique_ptr<juce::ParameterAttachment> aheadAttachment;
-    juce::OwnedArray<Knob> knobs;
-    std::vector<std::unique_ptr<juce::ParameterAttachment>> stepAttachments;
-    int brush = -1;             // tool picked in the palette, -1 = none
-    int playing = -1;
-    double shownBpm = -1.0;
-    bool shownPlaying = false;
-    int shownRowsPerStep = 0;
-    bool shownOwn = false;
-    juce::Rectangle<int> statusArea;
-    juce::Random rng;
+    FourTrackerProcessor& proc;
+    EditorState state;
+    DesignRoot root;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BreakbeatEditor)
+    TitleBar title;
+    HeaderControls header;
+    PatternView patternView;
+    ChannelStripsPanel strips;
+    SongPanel songPanel;
+    BlockPanel blockPanel;
+    InstrumentsPage instrumentsPage;
+    SampleEditPage sampleEditPage;
+    SettingsPage settingsPage;
+    SampleBrowser sampleBrowser;
+    TrackCount trackCount;                   // - TRACKS n + in the title bar
+    MasterVolume masterVolume;               // - MASTER 80 + in the title bar
+public:
+    RecBar recBar;                           // REC / STOP in the title bar (public for the tests)
+private:
+    TrackNav trackNav;                       // < 1-4 5-8 ... > under the pattern (more than 4 tracks)
+    int removeTrackAsked = -1;               // a track with notes: press - twice
+    void addTrack();
+    void removeTrack();
+    int lastViewKey = -1;                    // which channels are in view (strips / FX follow)
+    int lastKnobRevision = -1;               // follows proc.knobRevision (MIDI knobs on the synth)
+    void updateChannelView();
+   #if FOURTRACKER_FX_HOST
+    std::unique_ptr<FxPage> fxPage;          // VST effects (FX build, standalone only)
+    std::unique_ptr<FxBar> fxBar;            // the effect drop-downs under the channel strips
+    std::unique_ptr<RouteBar> routeBar;      // chaining drop-downs under the pattern
+    PixelButton fxButton { "FX", PixelButton::Style::Raised, 22.0f };
+    void toggleFxPage();
+   #endif
+    void layoutPatternView();
+public:
+    /** MIXER: all tracks with meters, CLIP lamps and faders, in a window of its own (Shift+M or MIX). */
+    void toggleMixer();
+    MixerPanel* getMixer();                  // null while it is closed (for the tests)
+    PixelButton mixButton { "MIX", PixelButton::Style::Raised, 20.0f };
+private:
+    std::unique_ptr<juce::DocumentWindow> mixerWindow;
+
+    PixelButton tabInstruments { "INSTRUMENTS", PixelButton::Style::Tab, 17.0f },
+                tabSample      { "SAMPLE EDIT", PixelButton::Style::Tab, 17.0f },
+                tabSong        { "SONG / PATTERN", PixelButton::Style::Tab, 17.0f },
+                tabBlock       { "BLOCK", PixelButton::Style::Tab, 17.0f },
+                tabSettings    { "MIDI / AUDIO", PixelButton::Style::Tab, 17.0f },
+                tabTracks      { "", PixelButton::Style::Tab, 17.0f };
+
+    Page page = Page::Tracks;
+    bool jamNoteDown = false;
+    int  jamInstrument = 0;
+    std::set<int> heldNoteKeys;   // note keys currently held, so key auto-repeat doesn't retrigger
+    // CHORD: which track each held key plays on (offset from the first key's track) and its instrument
+    struct ChordKey { int offset; int channel; int inst; };
+    std::map<int, ChordKey> chordKeys;
+    int chordBaseCh = 0, chordRow = 0;
+    bool chordNoteDown (int keyCode, int note);
+    void releaseChordKeys (bool all);
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FourTrackerEditor)
 };

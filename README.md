@@ -1,96 +1,462 @@
 # Four Tracker
 
-**A free sample tracker for Windows and Mac (1 to 16 tracks) that you play live: switch patterns from a MIDI keyboard while it plays.**
+A sample tracker with 1 to 16 tracks, built for live use. You switch patterns from a MIDI keyboard while it plays.
+It runs as a standalone Windows app (Windows Audio, DirectSound, or ASIO when built with the ASIO SDK) and as a
+VST3 / VST2 plugin, in 64-bit and 32-bit.
+The code is C++ with JUCE 8.
 
-**Website and download:** https://elcrispo76.github.io/Four-Tracker/
-**Releases (installer):** https://github.com/elcrispo76/Four-Tracker/releases
+> **Status: beta (0.x).** Written with the help of an AI coding assistant (Claude) and checked by the automated
+> test program in `Tests/`, but only a few people have used it so far. Expect bugs, save often, use at your own risk.
+> Road to 1.0: alpha → **beta (now)** → release candidate (fixes only) → 1.0 gold. Report bugs on GitHub Issues.
 
-> **Status: beta.** Four Tracker is written with the help of an AI coding assistant (Claude) and checked by an
-> automated test program (`source/Tests`), but only a few people have used it so far. Expect bugs, save your
-> modules often, and use it at your own risk. Road to 1.0: alpha → **beta (now)** → release candidate → 1.0 gold.
-> Please report bugs under [Issues](https://github.com/elcrispo76/Four-Tracker/issues).
+## Master volume
 
-## Features
+**MASTER** in the title bar (next to TRACKS) is the volume of all tracks together, 0-100, on every page: click - / +, drag the number, use the mouse wheel, or double-click for 80. During a fade it says FADE OUT, FADED OUT or FADE IN and shows the level. It is the same as MASTER on the MIDI / AUDIO page and is saved with the module.
 
-- **Live pattern switching.** C-2 on your MIDI keyboard starts and stops; C#2 and up pick patterns 00, 01, 02…; C-6 fades everything out and, pressed again, back in (LEARN moves it).
-  Switching is legato by default: the new pattern carries on from the same row.
-- **FastTracker 2 / ProTracker effect codes:** arpeggio, portamento, vibrato, tremolo, volume slides, retrigger,
-  pattern break and jump, Exx commands and more.
-- **Samples:** WAV, AIFF, FLAC, Ogg, MP3 and Amiga IFF 8SVX / raw 8-bit. A sample browser plays each file as
-  you select it.
-- **1 to 16 tracks:** add or remove one track at a time with - TRACKS +. The pattern shows 4 at a time; the
-  track bar under the pattern (◀ 1-4 5-8 9-12 13-16 ▶) or Tab moves between them.
-- **SYNTH 2:** two oscillators with PW / PWM on every wave (pulse width, shifted saw, skewed triangle, phase-distorted sine), a filter envelope, a tempo-synced LFO (up to two patterns long), chorus,
-  delay and reverb, round knobs, and 26 trance, italo disco and 80s patches; save your own patches as files.
-- **SYNTH 1:** sine, triangle, saw, square and noise, with ADSR, a resonant low-pass filter, distortion
-  and accent. Pattern commands 0Xvv / 0Zvv / 0Yvv / 0Vvv change cutoff, resonance, distortion and accent live.
-- **MIDI instruments:** an instrument slot can send MIDI notes (channel 1-16, optional program change) to a
-  hardware or software synth.
-- **Sample editor:** loops (forward, ping-pong, backward), fades, normalize, cut / copy / paste, OctaMED-style
-  MIX of two samples, Ctrl+A / C / X / V, stereo view.
-- **CHORD mode:** hold several keys and the notes spread over the next tracks, live and in EDIT mode, for
-  samples, synths and MIDI instruments.
-- **MASTER** volume in the title bar, **MUTE / SOLO** on every track, and **MIDI LEARN** for every synth knob.
-- **Sample pack:** 88 drum, bass and synth sounds (WAV, CC0), installed to Documents\Four Tracker\Samples.
-- **SPACING (0-32):** how many rows the cursor moves after a note and with the up / down arrows.
-- **VST3 effects** in the standalone app: three per track and three on the **master** (the whole mix), with
-  bypass, and chaining (send a track on into another track's effects, so one reverb or delay can be shared). Effects get Four Tracker's tempo and song position, so
-  tempo-synced effects follow the song.
-- **Modules (.ftm)** hold patterns and samples in one file.
-- **Windows:** standalone app (Windows Audio, DirectSound, ASIO) and **VST3 plugin**, 64-bit and 32-bit.
-- **Mac:** standalone app and **Audio Unit** instrument, Apple Silicon + Intel, with Audio Unit effects.
+## Tracks: 1 to 16
 
-## Free VST3 effects
+The title bar has **- TRACKS n +**. **+** adds one track (channel) at a time, up to 16, and jumps to it; **-**
+removes the last track (if it has notes, press - a second time to confirm). A new song has 4 tracks. The pattern
+always shows 4 tracks at a time: with more, **Tab** or the arrow keys move on and the view pages sideways
+(TRACKS 1-4, 5-8 ...). Under the pattern there is a track bar:
+**◀ / ▶** go to the previous / next 4 tracks, or click a group (TRACKS 1-4, 5-8, 9-12, 13-16) to jump
+straight to it. The channel strips and the FX lists follow the view.
 
-Five effects for Four Tracker and any DAW, in the same look. They are downloaded together: the **Effects Bundle** installs all of them in one go
-(tick the ones you want, 64-bit and/or 32-bit): `FourTrackerEffects-Bundle-1.0.0.exe` under
-[Releases](https://github.com/elcrispo76/Four-Tracker/releases) (tag `effect-bundle-1.0.0`). Its installer script
-is in [`effects-bundle/`](effects-bundle/): run each effect's `build-windows.bat` first, then `effects-bundle\build-bundle.bat`.
+- Modules remember their number of tracks; older modules load with 4. The plugin keeps it in the DAW project.
+- Removing a track clears its notes in all patterns (and its effects in the FX version).
 
-| Effect | What it is | Source |
-|---|---|---|
-| **Breakbeat Processor** | 8 step breakbeat slicer in time with the song | [`breakbeat-processor/`](breakbeat-processor/) |
-| **FX Processor** | Filter, PW gate, chorus, LFO, delay and reverb | [`fx-processor/`](fx-processor/) |
-| **FX Processor 2** | Phaser, flanger and ring modulator | [`fx-processor-2/`](fx-processor-2/) |
-| **Dynamics Processor** | Transient shaper, compressor and saturation, with AUTO for 8 kinds of instrument | [`dynamics-processor/`](dynamics-processor/) |
-| **Graphic EQ** | 10 bands, +12 / -12 dB, the sound follows the curve | [`graphic-eq/`](graphic-eq/) |
+## CHORD (several notes at once)
 
-## Repository layout
+**CHORD** (under EDIT in the top bar) lets you hold several note keys at once. The first key plays on the track the
+cursor is on, the next key on the track to the right, and so on. It works for samples, SYNTH 1, SYNTH 2 and MIDI
+instruments (one MIDI note per key).
+
+- **EDIT off:** the notes are only heard, each on its own track, through that track's VOL / PAN / MUTE / SOLO and its
+  effects.
+- **EDIT on:** the chord is written on the cursor's row, one note per track, and the cursor moves on (SPACING) after
+  the first note. A single key is a single note, as before.
+- There is no wrap-around: on the last track only the notes that fit to the right are used. Add tracks with **+** for
+  bigger chords.
+- The MIDI keyboard's keys still switch patterns; CHORD is for the computer keyboard.
+
+## MIDI instruments (MIDI out)
+
+On the Instruments page, **SOURCE → MIDI** turns a slot into a MIDI instrument: its notes are sent as MIDI instead
+of played. Set the **MIDI CHANNEL** (1-16) and optionally a **PROGRAM** (sent before the first note).
+
+- Standalone: choose the MIDI output device on the MIDI / AUDIO page.
+- Plugin: the notes go to the DAW; route the track's MIDI output to another instrument.
+- C-4 = MIDI note 60 (transpose and the channel's PITCH move it). Velocity comes from the volume (`0C` command, the
+  channel VOL). `===`, a new note, `ECx`, `K` / `14xx` or stopping sends note off.
+
+## Live MIDI control
+
+| Key (default) | Does |
+|---|---|
+| **C-2** (MIDI 36) | Start / stop |
+| **C#2** | Pattern 00 |
+| **D-2** | Pattern 01 |
+| **D#2** | Pattern 02 |
+| ... | ... one key per pattern, up to pattern 3F (63) |
+| **C-6** (MIDI 84) | **Fade**: all tracks fade out over FADE bars (1-16, default 4) and stay silent while the song keeps playing. Press it again to fade back in over the same time (also half way through a fade). STOP / START bring the full volume back. |
+
+- When stopped, a pattern key selects the pattern that C-2 will start. Pattern 00 is selected by default.
+- When playing, a pattern key switches pattern **without restarting**. Playback carries on from the next row at
+  the same position, and notes that are already ringing keep ringing.
+- The on-screen START / STOP (Song / Pattern page), Enter, and the pattern PREV / NEXT buttons do the same as the keys.
+- In the **MIDI / AUDIO** page you can:
+  - move the start/stop key (LEARN, then press a key),
+  - move the fade out key (FADE OUT LEARN, then press a key) and set how many bars the fade lasts. The fade key
+    wins over a pattern key on the same note (C-6 would otherwise be pattern 2F),
+  - pick a MIDI channel (or OMNI),
+  - choose how a switch takes over:
+    - **Next row (legato)**: the default
+    - **Next beat (legato)**: on the next 4-row boundary
+    - **End of pattern**
+    - **Restart at row 0**
+- MIDI Start / Stop messages (from a clock or sequencer) also start and stop playback. You can turn this off.
+
+## Audio settings
+
+- **Standalone app:** the MIDI / AUDIO page shows the driver type (ASIO, WASAPI, DirectSound), the device, the
+  sample rate, the buffer size and which MIDI inputs are enabled. These settings are saved between sessions.
+- **Plugin:** the host owns the audio driver. Route your MIDI keyboard to the plugin's track. You can turn on
+  FOLLOW HOST TEMPO to use the DAW's BPM instead of the tracker's.
+
+## Keyboard (computer)
+
+| Key | Action |
+|---|---|
+| Enter | Start / stop pattern |
+| Esc | Stop |
+| Space, or the red **EDIT** button | Edit mode on/off. The button is lit red while editing. When off (the default), note keys only play the selected instrument and nothing is written into the pattern. |
+| Arrows, Tab / Shift+Tab, PgUp/PgDn, Home/End | Move the cursor. On a cell with an instrument number, that instrument becomes the selected one (auto-select instrument). |
+| Z S X D C V G B H N J M , L . | Notes (lower octave) |
+| Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P | Notes (upper octave) |
+| (holding a note key) | Plays the sample once: holding does not retrigger it. A sample without a loop plays to its end even if you let go; a looped sample keeps looping while held and stops when you let go. |
+| 1 or ` | Note off (`===`) in the note column |
+| 0-9, A-F | Instrument / effect digits |
+| Delete / Insert / Backspace | Clear field / insert row / delete row |
+| F1 / F2, or the OCTAVE box | Octave down / up (0–7, default 4; octave 2 makes Z write C-2) |
+| F6 / F7 | SPACING down / up (0-32): how many rows the cursor moves after a note and with the up/down arrows (also the SPACING box in the top bar) |
+| Numpad + / - | Next / previous instrument |
+| Shift + arrows, or mouse drag | Mark a selection |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the marked selection |
+| Ctrl+F3 / F4 / F5 | Cut / copy / paste the block: the whole pattern, all 4 channels and all rows (64 rows = 4 bars) |
+| Shift+F3 / F4 / F5 | Cut / copy / paste track (one whole channel) |
+| Shift+1 / Shift+2 | Transpose the track at the cursor a note up / down |
+| Shift+M | MIXER window on / off (also the MIX button in the title bar) |
+| Ctrl+1 / Ctrl+2 | Transpose the track at the cursor an octave up / down |
+| Ctrl+Z / Ctrl+Y | Undo / redo pattern edits |
+| F3 / F4 | REC / STOP (the program only): record the jam, stop and save it |
+| F9 / F10 / F11 / F12 | Tracks / Instruments / Sample Edit / MIDI-Audio page |
+
+Mouse tricks:
+- Drag value boxes up/down. Hold Shift for fine steps. Use the mouse wheel, or double-click to type a value.
+- **MUTE** and **SOLO** on each channel strip (lit red when on; clicking the CH label mutes too). With SOLO on one or
+  more channels, only those are heard. MUTE wins over SOLO. Both are saved in the module.
+- Drop audio files on the window to load them into the selected slot (several files fill consecutive slots).
+- Drop a `.ftm` module (or an old `.ftps` pattern set) to load it.
+
+## Pattern format
+
+Each cell reads `NOTE INS CCPP`, for example `C-4 01 0C40`. `CC` is the effect number and `PP` is its parameter.
+C-4 plays a sample at its own sample rate.
+
+The effect numbers follow **FastTracker 2**. 00-0F are the classic ProTracker/MOD commands that OctaMED also uses.
+
+| CC | Effect | CC | Effect |
+|---|---|---|---|
+| 00 xy | Arpeggio | 0E 1x / 2x | Fine porta up / down |
+| 01 xx | Portamento up | 0E 4x / 7x | Vibrato / tremolo waveform |
+| 02 xx | Portamento down | 0E 5x | Set finetune |
+| 03 xx | Tone portamento | 0E 6x | Pattern loop |
+| 04 xy | Vibrato | 0E 8x | Set panning (coarse) |
+| 05 xy | Tone porta + volume slide | 0E 9x | Retrigger every x ticks |
+| 06 xy | Vibrato + volume slide | 0E Ax / Bx | Fine volume up / down |
+| 07 xy | Tremolo | 0E Cx | Note cut at tick x |
+| 08 xx | Set panning (00 left, 80 centre, FF right) | 0E Dx | Note delay x ticks |
+| 09 xx | Sample offset (xx * 256) | 0E Ex | Pattern delay x rows |
+| 0A xy | Volume slide | 0F xx | Speed (01-1F) or BPM (20-FF) |
+| 0B xx | Jump to pattern xx | 10 xx | Global volume (Gxx) |
+| 0C xx | Set volume (00-40) | 11 xy | Global volume slide (Hxy) |
+| 0D xy | Pattern break to row xy | 14 xx | Key off at tick xx (Kxx) |
+| | | 19 xy | Panning slide (Pxy) |
+| | | 1B xy | Multi retrigger (Rxy) |
+| | | 1D xy | Tremor (Txy) |
+| | | 21 1x / 2x | Extra fine porta (X1x / X2x) |
+| | | 0X vv | **Filter cutoff**, vv = 00-64 (64 = open). Type X in the effect number |
+| | | 0Z vv | **Filter resonance**, vv = 00-64. Type Z in the effect number |
+| | | 0Y vv | **Distortion**, vv = 00-64 (00 = clean). Type Y |
+| | | 0V vv | **Accent**, vv = 00-64: each new note starts louder and brighter. Type V |
+
+## Samples
+
+- **Formats:** WAV, AIFF, FLAC, Ogg and MP3, plus whatever Windows Media can decode. Samples can be mono or stereo,
+  up to 2 minutes long.
+- **Amiga samples** (ProTracker / OctaMED disks): IFF 8SVX (`.iff`, `.8svx`; plain, Fibonacci-compressed and
+  stereo, with loop and name, always at full volume like ProTracker) and raw signed 8-bit samples (`.raw`, `.smp`, `.sam`, `.snd` or no
+  extension), played at 16574 Hz like ProTracker's C-3.
+- **Sample browser:** LOAD (Instruments and Sample Edit pages) opens a browser inside the program. Click a file, or move
+  through the list with the arrow keys, and it plays at once, like in MadTracker, so you can hear it before you load it.
+  The right side shows the waveform, length, rate and bit depth. AUTO PLAY turns this off, PLAY / STOP (or Space) plays
+  it again. Enter, double-click or LOAD puts the file into the selected slot (select several to fill the following
+  slots); Esc or CANCEL closes it; Backspace goes up a folder. It remembers the folder while the program runs.
+- **Stereo samples** are drawn as two waveforms, L on top and R below, in Sample Edit and in the browser.
+- **Instruments page:** volume, transpose, fine tune, loop on/off, ping-pong and reverse playback.
+  Reverse playback doesn't change the sample.
+- **Sample Edit page:**
+  - drag the S / E markers and the loop handles,
+  - drag a selection, then SET LOOP,
+  - PLAY LOOP to audition the loop,
+  - cut / copy / paste, fade in / out, normalize and reverse (on the selection, or the whole sample if nothing is selected),
+  - **MIX** (like OctaMED): pick another slot from the list, and its sample is mixed into this one from the cursor
+    (or the start of the selection). It keeps its own pitch, can make the sample longer, turns it stereo if either
+    is stereo, and is scaled down only if the result would clip,
+  - **SAVE** (next to the name): saves the slot's sample as a WAV or AIFF file (Documents/Four Tracker/Samples is
+    suggested), e.g. a MIX or a loop from RE-SAMPLE. 16 or 24 bit like the sample; a WAV keeps the loop points. The
+    slot takes the file's name.
+  - **OFFSET** (offset calculator, for beat loops and breakbeats): choose how many **STEPS** the sample holds
+    (4, 8, **16 = 1 bar of 4/4**, 32 or 64). The sample (START to END) is cut into equal steps, drawn as lines on
+    the waveform, and each step shows its **09xx** code. Click a step (or arrows, Space) to hear it from there;
+    **WRITE AT CURSOR** (Enter) puts C-4 + the slot + 09xx on the pattern row at the cursor and moves on to the
+    next step. Step 1 needs no 09 (0900 repeats the last offset). Steps past 09FF (65280 frames, about 1.5 s at
+    44.1 kHz) show "--". The info line says how long the sample is in steps at the song's BPM, and which BPM fits.
+    **POP OUT** opens the codes as a small chart in a window of its own that stays on top: drag it to the side and
+    keep it while you write the beat on the Tracks or Block page. Esc closes the calculator.
+  - **RE-SAMPLE:** turns a pattern, or part of it, into a sample in the selected slot (pick an empty one). Choose the
+    **PATTERN**, then **WHOLE PATTERN** or **ROWS** (FROM ROW / TO ROW), and **ALL TRACKS** or **CHOOSE TRACKS** (tick
+    the tracks you want in the 16 squares). **USE BLOCK** takes the rows and tracks of the block marked in the pattern.
+    **ENDING:** **LOOP** (the default) makes the sample exactly as long as the rows: they are played twice in a row and the
+    second time is kept, which is exactly what you hear when the pattern loops (new notes cut the old ones, and only
+    what really rings on, like a reverb tail, goes over the start), so it loops without a seam; the loop points are set
+    over the whole sample. **CUT** is exactly as long as the rows, cut off at the end. **RING OUT** lets the sound ring
+    out after the last row (up to 4 seconds, until it is silent). **NORMALIZE** turns the loudest point up to just
+    under full scale. Enter re-samples, Esc cancels. It is rendered in the background in a
+    second engine, so the song that plays isn't disturbed, at the program's sample rate, in stereo, before MASTER
+    volume (turned down only if it would clip). The slot gets a name like **RS P02 ALL** or **RS P02 1+3**. VST
+    effects and MIDI instruments are not in the sample,
+  - zoom and scroll. Ctrl+wheel also zooms.
+  - **Keyboard:** click the waveform first (a white frame shows it is active), then **Ctrl+A** selects the whole
+    sample, **Ctrl+C / Ctrl+X / Ctrl+V** copy, cut and paste (paste goes in at the cursor), **Delete** removes the
+    selection without touching the clipboard and **Esc** clears the selection. Clicking elsewhere on the page or
+    changing page turns it off again, so the keys go back to playing notes.
+- **64 instrument slots** (01-40 in hex, 1-64 in decimal), shown 16 at a time in four banks (01-10, 11-20, 21-30,
+  31-40) on the INSTRUMENTS list and the INSTRUMENT SLOT grid. LOAD PATTERN puts a pattern's sounds into the empty
+  slots (the same sound already there is used again). Older modules load as they were.
+- Instrument slots 01-0F come pre-filled with small synthesized sounds (KICK.WAV, SNARE.WAV ...), and patterns 00-03
+  hold a demo. That way it makes sound straight away and you can try the live switching (C#2, D-2, D#2, E-2).
+  Replace them with your own samples.
+
+## Built-in synth (SYNTH 1)
+
+Any instrument slot can be a small synth instead of a sample. On the Instruments page set **SOURCE** to **SYNTH 1**:
+
+- **Waveform:** SINE, TRIANGLE, SAW, SQUARE or NOISE. The wave is one looping cycle (like the chip sounds on
+  Amiga modules), tuned so C-4 plays middle C. All effects work on it as on a sample.
+- **Envelope:** ATTACK, DECAY and RELEASE in milliseconds, SUSTAIN as a level 0-64. A note holds at the sustain
+  level until a note-off (`===`), a new note in the channel, or `ECx`; then it fades out over the release time.
+  Sustain 0 gives plucked / percussive notes that die away by themselves.
+- **Filter:** a resonant low-pass. CUTOFF 0-127 (127 = open), RESONANCE 0-127. Moving the sliders is heard at
+  once, also on notes that are already playing.
+- **Distortion:** DISTORTION 0-64 drives the synth into a soft clipper (0 = clean), level-matched so it doesn't
+  just get louder.
+- **Accent:** ACCENT 0-64 makes every note start louder and with the filter opened up, settling over about
+  150 ms, like the accent on a TB-303. It is easiest to hear with the cutoff partly closed.
+- **Sound commands in the pattern:** `0Xvv` cutoff, `0Zvv` resonance, `0Yvv` distortion and `0Vvv` accent,
+  vv from 00 to 64 (written as a normal number). Type `0`, then the letter in the effect column, then the value.
+  They work on synths and samples, the filter glides smoothly, and each stays on its channel until the next
+  command of the same kind or until playback is started again. `0X64 0Z00 0Y00 0V00` turns them all off.
+- **NEW MODULE → Empty** also removes the VST effects from all channels (FX version).
+- **MIDI LEARN (knobs on your MIDI keyboard):** right-click a synth slider → **MIDI LEARN**, then turn a knob. The
+  slider shows the knob (`CC 74`) and follows it, also while the pattern plays and when another instrument is
+  selected. Each synth slot has its own knobs, so two synths can be played with different knobs. One knob moves one
+  slider only: learning a knob that was already in use takes it away from the old slider. Right-click → **FORGET
+  KNOB** removes it. The knobs listen on the MIDI CHANNEL set on the MIDI / AUDIO page, and are saved in the module.
+- Sliders: click or drag, mouse wheel for fine steps, double-click resets.
+- Setting SOURCE back to SAMPLE brings back the sample the slot had before it became a synth or MIDI (as long as no other sample was loaded); a slot that never had one is cleared so you can load a sample.
+- Synth settings are saved in modules and in DAW projects.
+
+## SYNTH 2 (2 oscillators, LFO, FX, patches)
+
+On the Instruments page, **SOURCE → SYNTH 2** turns a slot into a bigger synth with round knobs (the first synth is
+now called **SYNTH 1**).
+
+- **Patches:** ◀ / ▶ step through them, **PATCHES** opens the list (TRANCE, ITALO DISCO, 80S and YOUR PATCHES), and
+  **SAVE PATCH** saves the knobs under a name in `Documents\Four Tracker\Synth 2 Patches` (one `.ft2patch` file per
+  patch, so they can be copied or shared). 26 factory patches: supersaw, plucks, gated pad, acid and rolling bass,
+  hoover, strings, octave bass, brass, poly stab, choir, bells, Juno pad, sweep pads and more.
+- **OSC 1:** WAVE (saw, pulse, triangle, sine) and PW, which shapes every wave: pulse width on PULSE, a shifted second saw on SAW (hollow, phasing), a skewed peak on TRI and phase distortion on SINE (50 % = the plain wave). It also shapes OSC 2. **OSC 2:** WAVE (also noise), SEMI (-24..+24),
+  FINE (±50 cents) and MIX (OSC 1 → OSC 2).
+- **FILTER:** resonant low-pass with CUTOFF, RESO, its own envelope (ENV AMT, F.DECAY).
+- **AMP:** ATTACK, DECAY, SUSTAIN, RELEASE.
+- **LFO:** SHAPE (sine, triangle, saw, square), SYNC (FREE, 1/16, 1/8, 1/4, 1/2, 1 BAR, 2 BARS, 1 PATT, 2 PATT) and
+  RATE (for FREE). With SYNC the LFO follows the tempo and starts with the pattern, so 1 PATT / 2 PATT is one sweep
+  over one or two whole patterns. **LFO TO:** PITCH, PWM and FILTER.
+- **FX:** CHORUS, DELAY (TIME in notes at the song's tempo, FEEDBACK, MIX, ping-pong) and REVERB (SIZE, MIX). The FX
+  run on the track the synth plays on, so echoes and reverb ring on after the note.
+- Knobs: drag up / down (Shift = fine), mouse wheel, double-click = default. **Right-click → MIDI LEARN** works on every
+  knob, as on SYNTH 1 (each slot has its own knobs; one MIDI knob moves one knob).
+- The sound commands `0X` / `0Z` / `0Y` / `0V` work on SYNTH 2 too. Knobs, patch name and MIDI knobs are saved in the
+  module.
+
+## REC: record your jam
+
+In the program (not in the VST3 / VST2 plugin, where the DAW records) **REC** and **STOP** sit in the title bar,
+also on **F3** and **F4**. REC records everything you hear while you jam: the tracks, their VST effects, the master
+effects, MASTER volume and FADE, the pattern switching from the MIDI keyboard and CHORD. It is written straight to a
+file in the background, so a long jam neither fills the memory nor makes the sound stutter. The button shows the time.
+
+STOP ends it and opens a menu: **SAVE AS MP3** (320 kbps), **SAVE AS FLAC** (lossless, 24-bit) or **SAVE AS WAV**
+(24-bit), **LISTEN** (opens it in your computer's player), **THROW AWAY AND RECORD AGAIN** (made a mistake? just take
+it again) or **THROW AWAY**. While a take waits to be saved, the STOP button says **SAVE** and opens the same menu;
+REC asks before it throws an unsaved take away. Jams are saved in `Documents\Four Tracker\Recordings`. If the program
+closes before a take is saved, it is kept there as `Unsaved jam <date>.wav`. Sound from external MIDI synths is
+not in the recording (it doesn't go through Four Tracker). MP3 uses the LAME encoder (LGPL), built in.
+
+## Saving
+
+- **Modules (.ftm):** SAVE MODULE writes one compressed file with everything in the song: all patterns,
+  all samples, instrument settings, speed, BPM, loop and mixer. LOAD MODULE reads `.ftm` files and also
+  old `.ftps` pattern sets (those hold patterns only, so the loaded samples are kept). You can also drop
+  a `.ftm` file on the window.
+- **Single patterns (.ftpat):** SAVE PATTERN (Song / Pattern page) saves the pattern in view together with the
+  instruments and samples it uses, so it sounds the same anywhere: to share with others, or to keep a fill, a
+  beat or a break for another song. They go to `Documents\Four Tracker\Patterns`. LOAD PATTERN puts one into the
+  pattern in view if it is empty, otherwise into the next empty pattern (it never writes over one; Ctrl+Z
+  undoes it). Its instruments go into empty slots and the notes are renumbered to match; a sound that is
+  already in the song is used again instead of loaded twice. **The song keeps its own SPEED and BPM:** tempo
+  commands (Fxx) in the pattern are taken out. A pattern with more tracks than the song adds tracks.
+- **NEW MODULE** asks: **Empty** (clears every pattern and sample), **Demo song** (loads the built-in demo
+  again) or **Cancel**.
+- **Standalone app:** always starts with the demo song. MIDI mapping, master volume and audio settings
+  are remembered, but the song is not, so save your work as a module before closing. If the song has changes
+  that aren't saved (since the last SAVE, LOAD or NEW: patterns, instruments, samples, tempo, tracks or mixer),
+  closing the program asks first: **Save...** (saves the module, then closes), **Don't save** or **Cancel**.
+  It also says when a REC recording isn't saved.
+- **Plugin:** the whole song is stored in your DAW project and comes back when you open it.
+- **Demo folder:** the first time the editor opens, it creates `Documents\Four Tracker\Demo` with
+  `Demo Song.ftm` and the demo sounds as WAV files in `Samples`. LOAD / SAVE start in `Documents\Four Tracker`.
+
+## Building on Windows
+
+1. Install Visual Studio 2022 (or newer) with **Desktop development with C++**, and tick the
+   **Windows 11 SDK**. JUCE 8 needs it, also for 32-bit builds. Install Git as well.
+2. Optional:
+   - **ASIO:** download the ASIO SDK from Steinberg's developer site and unzip it so this file exists:
+     `SDKs\asiosdk\common\iasiodrv.h`. Without it the app still runs on WASAPI / DirectSound.
+   - **VST2:** Steinberg no longer distributes the VST2 SDK. If you have a copy, put it so this file exists:
+     `SDKs\vst2sdk\pluginterfaces\vst2.x\aeffect.h`. Without it you get Standalone + VST3.
+3. Double-click `build-windows.bat`, or run it from a command prompt. It fetches JUCE, builds 64-bit and 32-bit
+   Release versions, and copies the results to:
+   - `dist\64-bit\` and `dist\32-bit\`
+   - `Four Tracker.exe`, `Four Tracker.vst3` and `Four Tracker.dll` (VST2)
+4. Install the plugins:
+   - **VST3:** copy `Four Tracker.vst3` to `C:\Program Files\Common Files\VST3` (64-bit) or
+     `C:\Program Files (x86)\Common Files\VST3` (32-bit).
+   - **VST2:** copy the `.dll` to your DAW's VST plugin folder (use the 32-bit one for 32-bit hosts).
+
+Manual CMake build:
+
+```
+cmake -B build -A x64 -DASIO_SDK_DIR=C:/path/asiosdk -DVST2_SDK_DIR=C:/path/vst2sdk
+cmake --build build --config Release
+```
+
+Use `-A Win32` for 32-bit. Add `-DFOURTRACKER_BUILD_TESTS=ON` to also build `FourTrackerTests`. That offline test
+plays the patterns through MIDI, checks the switching and saves a WAV.
+
+
+## Mixer
+
+- **Shift+M** or **MIX** in the title bar opens the MIXER in a window of its own that stays on top: a strip for every
+  track in use (4, 8 or 16) and the master.
+- Each strip has a peak meter (after VOL and the VST effects; green, yellow from -6 dB, red over 0 dB = overdriven),
+  a **CLIP** lamp that lights when the track goes over 0 dB and stays lit until clicked or **RESET CLIPS**, a volume
+  fader (VOL 0-64, double-click = 64, mouse wheel), pan, MUTE (M) and SOLO (S).
+- **MASTER**: the mix with MASTER volume (0-100) before the limiter; **LIMIT** lights when the limiter has to squeeze it.
+- The engine measures it in `mixerPeak[]` / `masterPeak` (1.0 = 0 dBFS); the computer keys still play in the window.
+
+## Pattern Maker (optional program)
+
+`PatternMaker/` holds **Four Tracker Pattern Maker**, a program of its own (CMake target `FourTrackerPatternMaker`,
+built with the rest; `-DFOURTRACKER_BUILD_PATTERN_MAKER=OFF` leaves it out). It makes beats, basslines and arps in
+10 styles (house, techno, drum & bass, jungle, breakbeat, electro, hip hop, trance, italo disco, ambient) on 8 lanes with sounds from the
+sample pack, plays them with Four Tracker's own engine, and saves them as `.ftpat` (with their sounds) for
+**LOAD PATTERN**. Bass and arp follow KEY and SCALE; SWING is written as `0E Dx`, soft hits as `0C xx`.
+The Windows installer and the Mac package have it as an optional part, off unless ticked.
+
+- **16 lanes** in two tabs: 1-8 are the style's (KICK/SLICE ... ARP/SLICE), 9-16 are yours (EMPTY/SLICE 9-16,
+  empty until a sound or a slice goes there; GENERATE leaves them alone). Four Tracker has 16 channels and 16
+  instrument slots per lane set and 64 in all, so a 16-lane `.ftpat` fits a song with room to spare.
+- **BLANK + REC**: BLANK empties the steps, REC counts in one bar and records MIDI pads / keys (and the keys 1-8)
+  on the nearest 16th while the pattern goes round (overdub). VELOCITY, UNDO, DOUBLE (1 bar -> 2 -> 4).
+  A row clock (`HighResolutionTimer`, 1 ms) and the audio device's latency place each hit between two rows.
+- **INPUT**: DRUM PADS (pads 1-16 from C-2 play lanes 1-16, the Arturia BeatStep / Akai MPD layout) or KEYBOARD
+  (drums on the General MIDI keys, KEYS: BASS / ARP on the rest, at their pitch). PADS > LEARN for your own.
+  Settings in `Four Tracker/Pattern Maker MIDI.json`.
+- **Metronome** (`Metronome.h`): its own sound on the audio device, after the engine's callback. It clicks on the
+  rows the engine began in that block, to the sample (`TrackerEngine::rowStarts`). The count-in is an empty
+  16-row pattern 01 the engine plays before 00 (PATTERN SWITCH = END OF PATTERN), so the pattern starts exactly
+  on the next beat. No lane, no slot, never saved.
+- **SLICER** (`Slicer.h/.cpp`): a long WAV / AIFF / FLAC (up to 10 min) cut AUTO (onsets in three bands, low / mid /
+  high, with a sensitivity), on a GRID of the BPM (from the file name when it says "... 136 BPM ...", else from the loop's
+  length: the bars - 1/2 to 16 - that give a whole BPM from 70 to 190, the fast one when two fit; /2 and X2 fix
+  it), or by hand; GENERATE (and BPM TO MAKER) puts the Pattern Maker at that BPM;
+  up to 64 slices on pages of 16 pads. GENERATE SAMPLE LIST writes the ticked ones as WAVs to
+  `Four Tracker/Slices/<name>/` and puts them on lanes 9-16 first (more than 8: from lane 16 down, so the kick
+  stays). A slice plays at its own pitch, also on the bass / arp lane.
+
+## Pattern Manager (optional program)
+
+`PatternManager/` holds **Four Tracker Pattern Manager** (CMake target `FourTrackerPatternManager`, small: no engine).
+It plays a whole song in Four Tracker - a list of positions (pattern number + rows) - by sending Four Tracker's pattern
+keys (start/stop key + 1 + pattern) over a virtual MIDI cable: LoopBe1 or loopMIDI on Windows, its own virtual port on
+macOS / Linux. Set Four Tracker's PATTERN SWITCH to END OF PATTERN: the next key is sent half way through the pattern
+that plays, so the switch lands exactly at its end. BPM and SPEED are set by hand. Song lists: `.ftsong` (JSON).
+Optional in the installers, off unless ticked.
+
+## FX version (VST effects)
+
+The FX version of the standalone app can load VST effects: **three effects per channel** (FX1, FX2, FX3), **three on the master** (the whole mix), plus chaining. There are two:
+
+| Build script | Folder | Effects | Share it? |
+|---|---|---|---|
+| `build-windows-fx-share.bat` | `dist-fx-share` | VST3 | **Yes.** The VST2 SDK is never used, even when it is in `SDKs`. VST3 is MIT licensed. |
+| `build-windows-fx.bat` | `dist-fx` | VST3 + VST2 (with the VST2 SDK in `SDKs`) | No, for your own use (VST2 SDK licence). |
+
+The normal build in `dist` is not touched. VST2 effects (and jBridge-bridged 32-bit effects, which are VST2)
+only load in the personal FX version.
+
+- Press **FX** in the title bar (or **F8**) to open the VST EFFECTS page.
+- **ADD FOLDER** adds a folder with plugins (sub-folders are searched too). The standard VST3 folder is there from the start.
+  **SCAN** finds all effects in the folders. Instruments are left out.
+- Under each channel strip on the tracks page there are three small drop-down lists, **FX1**, **FX2** and **FX3**, each with
+  an **E** button (opens the effect's window) and an **ON / OFF** button (bypass). The lists don't keep the
+  keyboard, so Enter still starts and stops the pattern after you pick an effect. The same lists are on the FX page.
+- Each channel has three drop-down lists, **FX1**, **FX2** and **FX3**. The sound goes through FX1, then FX2, then FX3.
+  **EDIT** opens the effect's own window and **ON / BYPASS** switches it on and off.
+- **MASTER** (the last row on the FX page): three effects on the whole mix, e.g. a compressor, an EQ or a limiter
+  over the whole song. They come after all the channels (and their chaining), before MASTER volume and FADE OUT.
+- **Chaining:** under the pattern on the tracks page each channel has a list **CHn > OUT** /
+  **CHn > INTO CHx FX**. Pick e.g. **CH2 > INTO CH1 FX** and CH2's sound (after CH2's own effects) goes on
+  through CH1's effects, so one reverb or delay can be shared by several tracks. Chains can be longer
+  (CH3 into CH2 into CH1); a loop is refused. Removing a track or NEW MODULE / Empty removes its chaining.
+- The effects, their settings and the chaining are saved in the module, so each song keeps its own: loading another module,
+  NEW MODULE or the demo song replaces them. An effect that isn't installed is named in the title bar, the rest loads.
+  The folders and the scanned list come back next time; the program starts with the demo song and no effects.
+- The effects get Four Tracker's tempo and song position, so tempo-synced effects (delays, the free Breakbeat
+  Processor slicer from the website ...) follow the song: 4 rows to a beat (SPEED 6 at 125 = 125 BPM), and each time
+  a pattern starts from the top it starts on a new bar.
+- A 64-bit Four Tracker loads 64-bit plugins only, and the 32-bit version 32-bit plugins only.
+- In the plugin versions (VST3 / VST2 inside a DAW), the FX page is not there: use the DAW's own effects.
+
+## Mac version (VST3 + Audio Unit)
+
+`build-mac.sh` builds the Mac version as one installer, `dist-mac/FourTracker-<version>-mac.pkg`. It installs
+**Four Tracker.app** (with Audio Unit and VST3 effects: 3 per track, 3 on the master, chaining, REC) in Applications,
+the **VST3** plugin and the **Audio Unit** (Logic, GarageBand, Live, Bitwig, Reaper ...) in /Library/Audio/Plug-Ins,
+and the user manual and the sample pack in /Users/Shared/Four Tracker (also copied to Documents/Four Tracker).
+Each part can be left out under "Customize". One build runs on Apple Silicon and Intel Macs, macOS 11 or newer.
+Never VST2.
+
+1. Install the Xcode command line tools (`xcode-select --install` in Terminal) and CMake (https://cmake.org/download).
+2. In Terminal, in this folder: `bash build-mac.sh`.
+3. Double-click `dist-mac/FourTracker-<version>-mac.pkg`.
+
+No Mac? The GitHub repository has a workflow (`.github/workflows/build-mac.yml`) that builds the .pkg on GitHub's
+Macs: Actions → Mac build → Run workflow (type the release tag, e.g. `v0.5.5`, to add the .pkg to that release).
+It also runs by itself when a release is published. The effects bundle has its own workflow
+(`build-mac-effects.yml`, "Mac build: effects bundle") that builds `FourTrackerEffects-Bundle-<version>-mac.pkg`
+from the `effects` folder.
+
+The Mac version is not signed with a paid Apple Developer ID, so the first time macOS says the installer can't be
+opened: open System Settings → Privacy & Security, scroll down and click **Open Anyway**. On the FX page, Audio Units
+are found by macOS and VST3 effects in the folders listed (/Library/Audio/Plug-Ins/VST3 to begin with): press SCAN.
+Mac keyboards may need **fn** for the F-keys, and have no Insert key.
+
+## Making an installer
+
+1. Build the program with `build-windows.bat` (the `dist` folder must hold the program).
+2. Install **Inno Setup 6.3 or newer** (free): https://jrsoftware.org/isdl.php
+3. Double-click `build-installer.bat` and pick:
+   - **1** personal: `dist\FourTracker-Setup-0.5.5-personal.exe` (with VST2 if built), for you
+   - **2** share: `dist\FourTracker-Setup-0.5.5-share.exe` (program + VST3 plugin)
+   - **3** FX personal: `dist-fx\FourTracker-Setup-0.5.5-personal-fx.exe` (VST3 + VST2 effects), for you
+   - **4** FX share: `dist-fx-share\FourTracker-Setup-0.5.5-share-fx.exe` (VST3 effects, no VST2), fine to share
+
+The installer (64-bit Windows) installs the program in Program Files with Start menu shortcuts and the
+user manual (PDF), and offers the VST3 and VST2 plugins in 64-bit and 32-bit as optional parts. VST3 goes
+to `Common Files\VST3`; for VST2 it asks which folder your music program scans. Only plugins that were
+actually built are offered. Uninstall from Windows Settings → Apps. Change the version number in
+`installer\FourTracker.iss` (`AppVersion`) for new releases.
+
+## Source layout
 
 | Path | Contents |
 |---|---|
-| `index.html`, `images/`, `Four-Tracker-User-Manual.pdf` | The website (GitHub Pages) |
-| `source/` | The program's source code, build scripts and installer script |
-| `source/BUILDING-AND-USAGE.md` | Keys, effect list, file formats, building and making the installer |
-| `source/installer/Sample Pack/` | The Four Tracker Sample Pack (CC0) that the installer adds |
-| `breakbeat-processor/` | Breakbeat Processor, free VST3 effect (its own build: `build-windows.bat`) |
-| `fx-processor/` | FX Processor, free multi-effect VST3 |
-| `fx-processor-2/` | FX Processor 2 (phaser, flanger, ring mod), free VST3 |
-| `dynamics-processor/` | Dynamics Processor (transient, compressor, saturation, AUTO), free VST3 |
-| `graphic-eq/` | Graphic EQ (10 bands), free VST3 |
-| `effects-bundle/` | One installer for all five effects (`build-bundle.bat`) |
-| `CREDITS.md` | Third-party software and licences |
-| `CLONE-CHECK.md` | Check of the source against six open-source trackers for copied code |
-| `LICENSE` | GNU AGPLv3 |
-
-## Building
-
-Windows, Visual Studio 2022 or newer with "Desktop development with C++" and the Windows 11 SDK.
-Run `source\build-windows.bat`: it fetches JUCE 8 and builds 64-bit and 32-bit versions into `source\dist`.
-`source\build-windows-fx-share.bat` builds the version with VST3 effect hosting into `source\dist-fx-share`
-(this is the one in the releases). It never uses the VST2 SDK.
-
-Mac: Xcode command line tools and CMake, then `bash source/build-mac.sh`. Without a Mac, run the **Mac build**
-workflow under Actions: it makes the .dmg on GitHub's Macs (and adds it to a release when one is published).
-The ASIO SDK (GPLv3) is in `source\SDKs\asiosdk`. The VST2 SDK, if you have it, also goes in `source\SDKs` but is
-never committed (see `.gitignore`). Details are in
-`source/BUILDING-AND-USAGE.md`.
-
-## License
-
-Four Tracker is free software: you can redistribute it and/or modify it under the terms of the
-GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version. It is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY. See `LICENSE`.
-
-Third-party components keep their own licences, see `CREDITS.md`.
+| `Source/TrackerEngine.*` | Playback, effects, timing, MIDI live control (audio thread) |
+| `Source/Instrument.*` | Sample data, loop points, destructive sample edits |
+| `Source/PluginProcessor.*` | Plugin wrapper, state save/load, pattern sets |
+| `Source/DemoContent.*` | Built-in demo sounds and patterns |
+| `Source/UI/*` | Pixel font, widgets, pattern view, pages (laid out on the 1536x1024 mockup grid and scaled) |

@@ -1,0 +1,2353 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Four Tracker - Copyright (C) 2026 elcrispo76
+
+#include "Pages.h"
+
+using namespace juce;
+using namespace ft;
+
+namespace
+{
+    void captionUnder (Graphics& g, Component& c, const String& text, float h = 16.0f)
+    {
+        auto b = c.getBoundsInParent().toFloat();
+        Theme::text (g, text, { b.getX() - 20.0f, b.getBottom() + 6.0f, b.getWidth() + 40.0f, h + 4.0f }, h, Theme::ink, Justification::centredTop);
+    }
+
+    void labelLeft (Graphics& g, const String& text, Rectangle<int> r, float h = 18.0f)
+    {
+        Theme::text (g, text, r.toFloat(), h, Theme::ink, Justification::centredLeft);
+    }
+
+    void infoTable (Graphics& g, Rectangle<float> area, const Instrument& in)
+    {
+        Theme::drawScreen (g, area);
+        const bool empty = in.isEmpty();
+        const String rows[5][2] = {
+            { "LENGTH",      empty ? "-" : String (in.data->getLength()) },
+            { "SAMPLE RATE", empty ? "-" : String ((int) in.data->sampleRate) },
+            { "BIT DEPTH",   empty ? "-" : String (in.data->bitDepth) },
+            { "CHANNELS",    empty ? "-" : (in.data->getNumChannels() == 1 ? String ("1 (MONO)") : String ("2 (STEREO)")) },
+            { "FILE SIZE",   empty ? "-" : String ((in.data->getLength() * in.data->getNumChannels() * jmax (8, in.data->bitDepth) / 8 + 1023) / 1024) + " KB" } };
+
+        const float rowH = (area.getHeight() - 8.0f) / 5.0f;
+        for (int i = 0; i < 5; ++i)
+        {
+            auto r = Rectangle<float> (area.getX() + 12.0f, area.getY() + 4.0f + i * rowH, area.getWidth() - 24.0f, rowH);
+            if (i > 0) { g.setColour (Colour (0xff2a2c31)); g.fillRect (r.getX() - 8.0f, r.getY(), r.getWidth() + 16.0f, 1.5f); }
+            Theme::text (g, rows[i][0], r, 15.0f, Theme::screenText, Justification::centredLeft);
+            Theme::text (g, rows[i][1], r, 15.0f, Theme::screenText, Justification::centredRight);
+        }
+    }
+
+    /** Plays an instrument from a mouse click. A looping instrument (a synth,
+        or a sample with loop on) would ring forever, so it is stopped again
+        after a moment, unless something else has been previewed since. */
+    int previewToken = 0;
+    void previewOnce (EditorState& st, int slot, Component* owner)
+    {
+        const int my = ++previewToken;
+        st.engine().requestPreview (slot, kNativeNote);
+        const auto& in = st.proc.getInstrument (slot);
+        if (in.isEmpty() || ! in.params.loop) return;
+        Component::SafePointer<Component> safe (owner);
+        auto* engine = &st.engine();
+        Timer::callAfterDelay (in.params.synth ? 900 : 1500, [safe, engine, my]
+        {
+            if (safe != nullptr && my == previewToken) engine->requestStopPreview();
+        });
+    }
+
+    void drawWaveIcon (Graphics& g, Rectangle<float> r, Colour c, int wave)
+    {
+        r = r.reduced (r.getWidth() * 0.12f, r.getHeight() * 0.28f);
+        Path p;
+        const int n = 48;
+        Random rnd (7);
+        for (int i = 0; i <= n; ++i)
+        {
+            const float ph = (float) i / n * 2.0f;          // two cycles
+            const float f = ph - std::floor (ph);
+            float v = 0.0f;
+            switch (wave)
+            {
+                case waveSine:     v = std::sin (f * MathConstants<float>::twoPi); break;
+                case waveTriangle: v = f < 0.5f ? 4.0f * f - 1.0f : 3.0f - 4.0f * f; break;
+                case waveSaw:      v = 2.0f * f - 1.0f; break;
+                case waveSquare:   v = f < 0.5f ? 1.0f : -1.0f; break;
+                default:           v = rnd.nextFloat() * 2.0f - 1.0f; break;
+            }
+            const float x = r.getX() + r.getWidth() * i / n, y = r.getCentreY() - v * r.getHeight() * 0.5f;
+            if (i == 0) p.startNewSubPath (x, y);
+            else if (wave == waveSquare || wave == waveSaw)
+            {
+                // vertical edges
+                const float prevY = p.getCurrentPosition().y;
+                if (std::abs (prevY - y) > r.getHeight() * 0.6f) p.lineTo (x, prevY);
+                p.lineTo (x, y);
+            }
+            else p.lineTo (x, y);
+        }
+        g.setColour (c);
+        g.strokePath (p, PathStrokeType (2.5f));
+    }
+
+}
+
+// ===========================================================================
+// ChannelStrip
+// ===========================================================================
+
+ChannelStrip::ChannelStrip (EditorState& s, int channel) : st (s), ch (channel)
+{
+    addAndMakeVisible (wave);
+    addAndMakeVisible (vol);
+    addAndMakeVisible (pan);
+    addAndMakeVisible (pitch);
+    for (auto* b : { &muteBtn, &soloBtn })
+    {
+        addAndMakeVisible (b);
+        b->setWantsKeyboardFocus (false);
+        b->setMouseClickGrabsKeyboardFocus (false);      // Enter keeps starting the pattern
+    }
+    muteBtn.setTooltip ("Mute this channel");
+    soloBtn.setTooltip ("Solo: hear only the channels on SOLO");
+    muteBtn.onClick = [this] { toggleMute(); };
+    soloBtn.onClick = [this] { toggleSolo(); };
+    wave.showMarkers = false;
+    wave.lineThickness = 1.2f;
+    wave.onClicked = [this]
+    {
+        if (shownInst > 0) { st.proc.selectedInstrument = shownInst; st.changed(); }
+    };
+
+    pan.formatter = [] (int v) { return panToString (v); };
+    pan.parser = [] (const String& t, bool& ok)
+    {
+        auto txt = t.trim().toUpperCase();
+        ok = true;
+        if (txt == "C" || txt == "0") return 0;
+        if (txt.startsWith ("L")) return -txt.substring (1).getIntValue();
+        if (txt.startsWith ("R")) return txt.substring (1).getIntValue();
+        return txt.getIntValue();
+    };
+    pan.setDragSensitivity (2.0f);
+    pitch.formatter = [] (int v) { return signedToString (v); };
+    pitch.setDragSensitivity (8.0f);
+    vol.setDragSensitivity (2.0f);
+
+    vol.onChange   = [this] (int v) { st.engine().mix[ch].volume = v; };
+    pan.onChange   = [this] (int v) { st.engine().mix[ch].pan = v; };
+    pitch.onChange = [this] (int v) { st.engine().mix[ch].pitch = v; };
+    refresh();
+}
+
+void ChannelStrip::setChannel (int c)
+{
+    if (c == ch) return;
+    ch = c;
+    shownInst = -1;
+    shownData = nullptr;
+    level = 0.0f;
+    refresh();
+    repaint();
+}
+
+void ChannelStrip::refresh()
+{
+    auto& e = st.engine();
+    vol.setValue (e.mix[ch].volume.load());
+    pan.setValue (e.mix[ch].pan.load());
+    pitch.setValue (e.mix[ch].pitch.load());
+
+    int inst = e.lastInstrumentOnChannel[ch].load();
+    if (inst <= 0)
+    {
+        // Before anything has played, show the first instrument used in this channel.
+        auto& pat = e.getPattern (e.selectedPattern.load());
+        for (int r = 0; r < pat.getNumRows() && inst <= 0; ++r) inst = pat.at (r, ch).inst;
+    }
+
+    auto& in = st.proc.getInstrument (jmax (0, inst));
+    if (inst != shownInst || in.data.get() != shownData || in.name != name)
+    {
+        shownInst = inst;
+        shownData = in.data.get();
+        name = inst > 0 ? in.name : String();
+        wave.setSample (inst > 0 ? in.data : nullptr, nullptr);
+        repaint();
+    }
+
+    const float lvl = (float) e.channelLevel[ch].exchange (0) / 1000.0f;
+    const float newLevel = jmax (lvl, level * 0.82f);
+    const bool m = e.mix[ch].mute.load();
+    const bool so = e.mix[ch].solo.load(), sil = e.isChannelSilenced (ch);
+    muteBtn.setToggleState (m, dontSendNotification);
+    soloBtn.setToggleState (so, dontSendNotification);
+    if (std::abs (newLevel - level) > 0.004f || m != muted || so != soloed || sil != silenced)
+    {
+        level = newLevel;
+        muted = m;
+        soloed = so;
+        silenced = sil;
+        repaint (wave.getBounds().withY (wave.getBottom()).withHeight (8));
+        repaint (0, 0, 120, 50);
+    }
+}
+
+void ChannelStrip::paint (Graphics& g)
+{
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    Theme::text (g, "CH" + String (ch + 1), { 18.0f, 14.0f, 120.0f, 30.0f }, ch >= 9 ? 24.0f : 30.0f, silenced ? Theme::panelEdgeLo : Theme::ink, Justification::centredLeft, true);
+
+    labelLeft (g, "VOL",   { 222, 16, 56, 40 }, 17.0f);
+    labelLeft (g, "PAN",   { 222, 64, 56, 40 }, 17.0f);
+    labelLeft (g, "PITCH", { 212, 112, 66, 40 }, 17.0f);
+
+    // level meter under the waveform
+    auto meter = Rectangle<float> ((float) wave.getX(), (float) wave.getBottom() + 2.0f, (float) wave.getWidth(), 5.0f);
+    g.setColour (Colour (0xff3a3d43));
+    g.fillRect (meter);
+    g.setColour (Theme::ink);
+    g.fillRect (meter.withWidth (meter.getWidth() * jmin (1.0f, level * 1.4f)));
+
+    Theme::text (g, name.isEmpty() ? String ("---") : name, { 18.0f, 146.0f, 190.0f, 20.0f }, 18.0f, Theme::ink, Justification::centredLeft);
+}
+
+void ChannelStrip::resized()
+{
+    wave.setBounds (16, 52, 188, 82);
+    vol.setBounds (280, 12, 74, 46);
+    pan.setBounds (280, 60, 74, 46);
+    pitch.setBounds (280, 108, 74, 46);
+    muteBtn.setBounds (100, 12, 50, 34);
+    soloBtn.setBounds (154, 12, 50, 34);
+}
+
+void ChannelStrip::mouseDown (const MouseEvent& e)
+{
+    if (e.y < 50 && e.x < 98) toggleMute();   // clicking the channel name still works
+}
+
+void ChannelStrip::toggleSolo()
+{
+    auto& so = st.engine().mix[ch].solo;
+    so = ! so.load();
+    int n = 0;
+    for (int c = 0; c < st.numChannels(); ++c) n += st.engine().mix[c].solo.load() ? 1 : 0;
+    st.setStatus (String ("CH") + String (ch + 1) + (so.load() ? " SOLO" : " SOLO OFF")
+                  + (n > 0 ? " - HEARING " + String (n) + " SOLO CHANNEL" + (n > 1 ? "S" : "") : String()));
+    refresh();
+    repaint();
+}
+
+void ChannelStrip::toggleMute()
+{
+    auto& m = st.engine().mix[ch].mute;
+    m = ! m.load();
+    st.setStatus (String ("CH") + String (ch + 1) + (m.load() ? " MUTED" : " UNMUTED"));
+    refresh();
+    repaint();
+}
+
+ChannelStripsPanel::ChannelStripsPanel (EditorState& s) : st (s)
+{
+    for (int i = 0; i < kVisibleChannels; ++i)
+    {
+        strips.push_back (std::make_unique<ChannelStrip> (s, i));
+        addAndMakeVisible (*strips.back());
+    }
+}
+
+void ChannelStripsPanel::resized()
+{
+    const int gap = 12;
+    const int w = (getWidth() - gap * 3) / 4;
+    for (int i = 0; i < kVisibleChannels; ++i)
+        strips[(size_t) i]->setBounds (i * (w + gap), 0, w, getHeight());
+}
+
+void ChannelStripsPanel::refresh()
+{
+    const int first = st.firstVisibleChannel(), n = st.numChannels();
+    for (int i = 0; i < kVisibleChannels; ++i)
+    {
+        auto& s = *strips[(size_t) i];
+        s.setVisible (first + i < n);
+        s.setChannel (first + i);
+        s.refresh();
+    }
+}
+
+// ===========================================================================
+// SongPanel
+// ===========================================================================
+
+SongPanel::SongPanel (EditorState& s) : st (s)
+{
+    for (auto* b : { &start, &stop, &newSet, &load, &save, &loadPat, &savePat }) { addAndMakeVisible (b); b->iconWidth = 22.0f; }
+    loadPat.subLabel = "PATTERN"; loadPat.icon = Theme::iconFolder;
+    savePat.subLabel = "PATTERN"; savePat.icon = Theme::iconSave;
+    loadPat.setTooltip ("Load a single pattern (.ftpat) into an empty pattern, with its instruments. The song keeps its tempo.");
+    savePat.setTooltip ("Save the pattern in view (.ftpat) with the instruments it uses, to share or to use in another song.");
+    savePat.onClick = [this]
+    {
+        const int p = st.viewPattern();
+        if (st.engine().getPattern (p).isEmpty()) { st.setStatus ("PATTERN " + formatNumber (p, 2, st.hex()) + " IS EMPTY"); st.changed(); return; }
+        auto dir = patternFolder();
+        dir.createDirectory();
+        chooser = std::make_unique<FileChooser> ("Save pattern " + formatNumber (p, 2, st.hex()) + " (with its instruments)",
+                                                 dir.getChildFile ("pattern " + formatNumber (p, 2, st.hex()) + ".ftpat"), "*.ftpat");
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                savePatternFile (f);
+            });
+    };
+    loadPat.onClick = [this]
+    {
+        auto dir = patternFolder();
+        dir.createDirectory();
+        chooser = std::make_unique<FileChooser> ("Load a pattern into an empty pattern", dir, "*.ftpat");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                loadPatternFile (f);
+            });
+    };
+    newSet.subLabel = "MODULE";
+    newSet.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        // blank page with a folded corner
+        auto b = r.withSizeKeepingCentre (r.getWidth() * 0.8f, jmin (r.getHeight(), r.getWidth() * 1.1f));
+        Path p;
+        const float fold = b.getWidth() * 0.35f;
+        p.startNewSubPath (b.getX(), b.getY());
+        p.lineTo (b.getRight() - fold, b.getY());
+        p.lineTo (b.getRight(), b.getY() + fold);
+        p.lineTo (b.getRight(), b.getBottom());
+        p.lineTo (b.getX(), b.getBottom());
+        p.closeSubPath();
+        g.setColour (c);
+        g.strokePath (p, PathStrokeType (2.5f));
+        g.drawLine (b.getRight() - fold, b.getY(), b.getRight() - fold, b.getY() + fold, 2.5f);
+        g.drawLine (b.getRight() - fold, b.getY() + fold, b.getRight(), b.getY() + fold, 2.5f);
+    };
+    newSet.onClick = [this]
+    {
+        auto opts = MessageBoxOptions::makeOptionsYesNoCancel (MessageBoxIconType::WarningIcon,
+                        "New module",
+                        "Start with an empty module, or load the demo song?\n"
+                        "Both replace ALL patterns and ALL loaded samples.\nAnything not saved will be lost.",
+                        "Empty", "Demo song", "Cancel", this);
+        Component::SafePointer<SongPanel> safe (this);
+        std::function<void (int)> onResult = [safe] (int result)
+        {
+            if (result == 0) return;   // cancel
+            if (auto* panel = safe.getComponent())
+                panel->clearEverything (result == 2);
+        };
+        AlertWindow::showAsync (opts, onResult);
+    };
+    start.subLabel = "PATTERN"; start.icon = Theme::iconPlay;
+    stop.subLabel  = "PATTERN"; stop.icon  = Theme::iconStop;
+    load.subLabel  = "MODULE"; load.icon = Theme::iconFolder;
+    save.subLabel  = "MODULE"; save.icon = Theme::iconSave;
+
+    addAndMakeVisible (length);
+    length.setShowSpinner (true);
+    length.setDragSensitivity (3.0f);
+    length.setLargeStep (16);
+
+    start.onClick = [this] { st.engine().requestStart(); };
+    stop.onClick  = [this] { st.engine().requestStop(); };
+
+    length.onChange = [this] (int v)
+    {
+        auto& pat = st.engine().getPattern (st.viewPattern());
+        pat.numRows = v;
+        if (st.cursorRow >= v) st.cursorRow = v - 1;
+        st.changed();
+    };
+
+    save.onClick = [this]
+    {
+        auto name = lastModule.existsAsFile() ? lastModule : lastDir.getChildFile ("my song.ftm");
+        chooser = std::make_unique<FileChooser> ("Save module (patterns + samples)", name, "*.ftm");
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                if (! f.hasFileExtension ("ftm")) f = f.withFileExtension ("ftm");
+                const bool ok = st.proc.saveModule (f);
+                if (ok) { lastModule = f; lastDir = f.getParentDirectory(); }
+                st.setStatus (ok ? "SAVED " + f.getFileName().toUpperCase() : String ("COULD NOT SAVE FILE"));
+                st.changed();
+            });
+    };
+
+    load.onClick = [this]
+    {
+        chooser = std::make_unique<FileChooser> ("Load module", lastDir, "*.ftm;*.ftps");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+            [this] (const FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == File()) return;
+                auto err = st.proc.loadModule (f);
+                if (err.isEmpty()) { lastModule = f; lastDir = f.getParentDirectory(); }
+                st.undoStack.clear(); st.redoStack.clear();
+                st.hasSelection = false;
+                const auto note = st.proc.takeLoadNote();
+                st.setStatus (err.isNotEmpty() ? err.toUpperCase() : note.isNotEmpty() ? note : "LOADED " + f.getFileName().toUpperCase());
+                st.changed();
+            });
+    };
+}
+
+File SongPanel::patternFolder()
+{
+    return FourTrackerProcessor::getUserFolder().getChildFile ("Patterns");
+}
+
+void SongPanel::savePatternFile (const File& file)
+{
+    auto f = file.hasFileExtension ("ftpat") ? file : file.withFileExtension ("ftpat");
+    const int p = st.viewPattern();
+    const auto err = st.proc.savePattern (p, f);
+    st.setStatus (err.isEmpty() ? "SAVED PATTERN " + formatNumber (p, 2, st.hex()) + " AS " + f.getFileName().toUpperCase() : err);
+    st.changed();
+}
+
+void SongPanel::loadPatternFile (const File& f)
+{
+    const int view = st.viewPattern();
+    const int target = st.engine().getPattern (view).isEmpty() ? view : st.proc.findEmptyPattern ((view + 1) % kMaxPatterns);
+    if (target < 0) { st.setStatus ("NO EMPTY PATTERN LEFT - CLEAR ONE FIRST"); st.changed(); return; }
+    st.pushUndo (target);
+    bool ok = false;
+    const auto msg = st.proc.loadPattern (f, target, ok);
+    if (! ok) st.undoStack.pop_back();
+    else if (! st.engine().playing.load() && target != view) st.engine().requestPattern (target);   // show it (while playing it waits)
+    st.setStatus (msg);
+    st.changed();
+}
+
+void SongPanel::clearEverything (bool loadDemo)
+{
+    if (loadDemo) st.proc.loadDemoSong();
+    else        { st.proc.newPatternSet(); st.proc.clearAllEffects(); }   // Empty: the VST effects go too
+    lastModule = File();
+    st.undoStack.clear();
+    st.redoStack.clear();
+    st.hasSelection = false;
+    st.cursorRow = 0; st.cursorCh = 0; st.cursorCol = 0;
+    st.setStatus (loadDemo ? "DEMO SONG LOADED" : (st.proc.getFxHost() != nullptr ? "NEW MODULE - EVERYTHING CLEARED, ALSO THE EFFECTS"
+                                                                                  : "NEW MODULE - EVERYTHING CLEARED"));
+    st.changed();
+}
+
+void SongPanel::refresh()
+{
+    length.setValue (st.engine().getPattern (st.viewPattern()).getNumRows());
+}
+
+void SongPanel::paint (Graphics& g)
+{
+    Theme::drawPanel (g, Rectangle<float> (0.0f, 0.0f, 250.0f, (float) getHeight()));
+    Theme::text (g, "SONG /",  { 0.0f, 30.0f, 250.0f, 50.0f }, 30.0f, Theme::ink, Justification::centred, true);
+    Theme::text (g, "PATTERN", { 0.0f, 92.0f, 250.0f, 50.0f }, 30.0f, Theme::ink, Justification::centred, true);
+
+    auto lenPanel = Rectangle<float> (1284.0f, 0.0f, (float) getWidth() - 1284.0f, (float) getHeight());
+    Theme::drawPanel (g, lenPanel);
+    Theme::text (g, "PATTERN LENGTH", lenPanel.withTrimmedTop (20.0f).withHeight (18.0f), 15.0f, Theme::ink, Justification::centredTop);
+
+    Theme::drawPanel (g, Rectangle<float> (258.0f, 0.0f, 1018.0f, (float) getHeight()));
+}
+
+void SongPanel::resized()
+{
+    const int x0 = 266, w = 138, gap = 6;
+    PixelButton* bs[] = { &start, &stop, &newSet, &load, &save, &loadPat, &savePat };
+    for (int i = 0; i < 7; ++i)
+        bs[i]->setBounds (x0 + i * (w + gap), 12, w, 148);
+    length.setBounds (1310, 66, 170, 64);
+}
+
+// ===========================================================================
+// BlockPanel
+// ===========================================================================
+
+BlockPanel::BlockPanel (EditorState& s, PatternView& pv) : st (s)
+{
+    for (auto* b : { &copyTrack, &cutTrack, &pasteTrack, &copyBlock, &cutBlock, &pasteBlock })
+    {
+        addAndMakeVisible (b);
+        b->iconWidth = 30.0f;
+    }
+    copyTrack.subLabel = cutTrack.subLabel = pasteTrack.subLabel = "TRACK";
+    copyBlock.subLabel = cutBlock.subLabel = pasteBlock.subLabel = "BLOCK";
+    copyTrack.icon = copyBlock.icon = Theme::iconClip;
+    pasteTrack.icon = pasteBlock.icon = Theme::iconClip;
+    cutTrack.icon = cutBlock.icon = Theme::iconScissors;
+
+    copyTrack.onClick  = [&pv] { pv.copyTrack(); };
+    cutTrack.onClick   = [&pv] { pv.cutTrack(); };
+    pasteTrack.onClick = [&pv] { pv.pasteTrack(); };
+    copyBlock.onClick  = [&pv] { pv.copyWholeBlock(); };
+    cutBlock.onClick   = [&pv] { pv.cutWholeBlock(); };
+    pasteBlock.onClick = [&pv] { pv.pasteWholeBlock(); };
+
+    // TRANSPOSE: the track at the cursor, a note or an octave at a time
+    for (auto* b : { &octDown, &noteDown, &noteUp, &octUp }) addAndMakeVisible (b);
+    octDown.subLabel = octUp.subLabel = "OCTAVE";
+    noteDown.subLabel = noteUp.subLabel = "NOTE";
+    octDown.setTooltip ("Moves every note in the track at the cursor down an octave (12 notes)");
+    noteDown.setTooltip ("Moves every note in the track at the cursor down a note");
+    noteUp.setTooltip ("Moves every note in the track at the cursor up a note");
+    octUp.setTooltip ("Moves every note in the track at the cursor up an octave (12 notes)");
+    octDown.onClick  = [&pv] { pv.transposeTrack (-12); };
+    noteDown.onClick = [&pv] { pv.transposeTrack (-1); };
+    noteUp.onClick   = [&pv] { pv.transposeTrack (1); };
+    octUp.onClick    = [&pv] { pv.transposeTrack (12); };
+}
+
+void BlockPanel::paint (Graphics& g)
+{
+    Theme::drawPanel (g, Rectangle<float> (0.0f, 0.0f, (float) kLabelW, (float) getHeight()));
+    Theme::text (g, "BLOCK", { 0.0f, 0.0f, (float) kLabelW, (float) getHeight() }, 40.0f, Theme::ink, Justification::centred, true);
+
+    Theme::drawPanel (g, trackArea.toFloat());
+    Theme::drawPanel (g, transposeArea.toFloat());
+    Theme::drawPanel (g, blockArea.toFloat());
+    Theme::text (g, "TRACK OPERATIONS", trackArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
+    Theme::text (g, "TRANSPOSE TRACK", transposeArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
+    Theme::text (g, "BLOCK OPERATIONS", blockArea.toFloat().translated (18.0f, 12.0f).withHeight (20.0f), 19.0f, Theme::ink, Justification::topLeft);
+    captionUnder (g, octDown, "CTRL+2", 15.0f);
+    captionUnder (g, noteDown, "SHIFT+2", 15.0f);
+    captionUnder (g, noteUp, "SHIFT+1", 15.0f);
+    captionUnder (g, octUp, "CTRL+1", 15.0f);
+
+    captionUnder (g, cutTrack, "SHIFT+F3", 16.0f);
+    captionUnder (g, copyTrack, "SHIFT+F4", 16.0f);
+    captionUnder (g, pasteTrack, "SHIFT+F5", 16.0f);
+    captionUnder (g, cutBlock, "CTRL+F3", 16.0f);
+    captionUnder (g, copyBlock, "CTRL+F4", 16.0f);
+    captionUnder (g, pasteBlock, "CTRL+F5", 16.0f);
+}
+
+void BlockPanel::resized()
+{
+    // BLOCK label | TRACK OPERATIONS | TRANSPOSE TRACK | BLOCK OPERATIONS
+    const int x0 = kLabelW + 8, rest = getWidth() - x0 - 16;
+    const int wTrack = rest * 32 / 100, wTrans = rest * 35 / 100;
+    trackArea     = { x0, 0, wTrack, getHeight() };
+    transposeArea = { trackArea.getRight() + 8, 0, wTrans, getHeight() };
+    blockArea     = { transposeArea.getRight() + 8, 0, getWidth() - transposeArea.getRight() - 8, getHeight() };
+
+    auto layout = [] (Rectangle<int> area, PixelButton& a, PixelButton& b, PixelButton& c)
+    {
+        auto r = area.reduced (16, 0).withTrimmedTop (46).withHeight (76);
+        const int w = (r.getWidth() - 16) / 3;
+        a.setBounds (r.removeFromLeft (w)); r.removeFromLeft (8);
+        b.setBounds (r.removeFromLeft (w)); r.removeFromLeft (8);
+        c.setBounds (r);
+    };
+    layout (trackArea, cutTrack, copyTrack, pasteTrack);
+    layout (blockArea, cutBlock, copyBlock, pasteBlock);
+    {
+        auto r = transposeArea.reduced (12, 0).withTrimmedTop (46).withHeight (76);
+        const int w = (r.getWidth() - 18) / 4;
+        for (auto* b : { &octDown, &noteDown, &noteUp })
+        {
+            b->setBounds (r.removeFromLeft (w));
+            r.removeFromLeft (6);
+        }
+        octUp.setBounds (r);
+    }
+}
+
+// ===========================================================================
+// InstrumentList
+// ===========================================================================
+
+// ===========================================================================
+// BankButtons
+// ===========================================================================
+
+BankButtons::BankButtons (EditorState& s) : st (s)
+{
+    for (int b = 0; b < kNumBanks; ++b)
+    {
+        auto btn = std::make_unique<PixelButton> ("", PixelButton::Style::Segment, 15.0f);
+        btn->setClickingTogglesState (true);
+        btn->setRadioGroupId (7300 + (int) (reinterpret_cast<uintptr_t> (this) % 1000));
+        btn->onClick = [this, b]
+        {
+            // the same row in the other bank
+            const int row = (st.proc.selectedInstrument - 1) % kSlotsPerBank;
+            st.proc.selectedInstrument = b * kSlotsPerBank + row + 1;
+            sync();
+            if (onBankChanged) onBankChanged();
+            st.changed();
+        };
+        addAndMakeVisible (*btn);
+        buttons[(size_t) b] = std::move (btn);
+    }
+    sync();
+}
+
+void BankButtons::sync()
+{
+    const int bank = bankOf (st.proc.selectedInstrument);
+    const bool hex = st.hex();
+    if (bank == shownBank && hex == shownHex) return;
+    shownBank = bank;
+    shownHex = hex;
+    for (int b = 0; b < kNumBanks; ++b)
+    {
+        auto& btn = *buttons[(size_t) b];
+        btn.setButtonText (formatNumber (b * kSlotsPerBank + 1, 2, hex) + "-" + formatNumber ((b + 1) * kSlotsPerBank, 2, hex));
+        btn.setToggleState (b == bank, dontSendNotification);
+    }
+}
+
+void BankButtons::resized()
+{
+    const int gap = 6, w = (getWidth() - gap * (kNumBanks - 1)) / kNumBanks;
+    for (int b = 0; b < kNumBanks; ++b) buttons[(size_t) b]->setBounds (b * (w + gap), 0, w, getHeight());
+}
+
+InstrumentList::InstrumentList (EditorState& s) : st (s)
+{
+    addAndMakeVisible (banks);
+    banks.onBankChanged = [this] { if (onSelectionChanged) onSelectionChanged(); };
+    addAndMakeVisible (load);
+    addAndMakeVisible (discard);
+    load.icon = Theme::iconFolder;
+    discard.icon = Theme::iconTrash;
+    load.iconWidth = discard.iconWidth = 40.0f;
+
+    load.onClick = [this]
+    {
+        // in-app browser that plays each sample as you select it
+        if (st.openSampleBrowser) st.openSampleBrowser();
+    };
+
+    discard.onClick = [this]
+    {
+        st.proc.discardInstrument (st.proc.selectedInstrument);
+        st.setStatus ("DISCARDED INSTRUMENT " + hex2 (st.proc.selectedInstrument));
+        st.changed();
+    };
+}
+
+void InstrumentList::paint (Graphics& g)
+{
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    Theme::text (g, "INSTRUMENTS", { 18.0f, 14.0f, 300.0f, 32.0f }, 30.0f, Theme::ink, Justification::centredLeft, true);
+
+    banks.sync();
+    Theme::drawScreen (g, listArea);
+    const float rowH = (listArea.getHeight() - 4.0f) / kSlotsPerBank;
+    for (int k = 1; k <= kSlotsPerBank; ++k)
+    {
+        const int i = firstSlot() + k;
+        auto r = Rectangle<float> (listArea.getX() + 2.0f, listArea.getY() + 2.0f + (k - 1) * rowH, listArea.getWidth() - 4.0f, rowH);
+        const bool sel = i == st.proc.selectedInstrument;
+        if (sel) { g.setColour (Theme::buttonLight); g.fillRect (r); }
+        g.setColour (Colour (0xff2a2c31));
+        if (k > 1) g.fillRect (r.getX(), r.getY(), r.getWidth(), 1.5f);
+        g.fillRect (r.getX() + 66.0f, r.getY(), 1.5f, r.getHeight());
+
+        const auto col = sel ? Theme::ink : Theme::screenText;
+        const auto& in = st.proc.getInstrument (i);
+        Theme::text (g, formatNumber (i, 2, st.hex()), r.withWidth (66.0f), 20.0f, col, Justification::centred);
+        Theme::text (g, in.isEmpty() ? String ("---") : in.name, r.withTrimmedLeft (86.0f), 20.0f, col, Justification::centredLeft);
+    }
+}
+
+void InstrumentList::resized()
+{
+    banks.setBounds (12, 58, getWidth() - 24, 34);
+    listArea = { 12.0f, 98.0f, (float) getWidth() - 24.0f, 530.0f };
+    const int w = (getWidth() - 24 - 10) / 2;
+    load.setBounds (12, 640, w, 66);
+    discard.setBounds (12 + w + 10, 640, w, 66);
+}
+
+int InstrumentList::rowAt (float y) const
+{
+    if (y < listArea.getY() || y > listArea.getBottom()) return -1;
+    const float rowH = (listArea.getHeight() - 4.0f) / kSlotsPerBank;
+    return firstSlot() + jlimit (1, kSlotsPerBank, 1 + (int) ((y - listArea.getY() - 2.0f) / rowH));
+}
+
+void InstrumentList::mouseDown (const MouseEvent& e)
+{
+    const int r = rowAt (e.position.y);
+    if (r <= 0) return;
+    st.proc.selectedInstrument = r;
+    if (onSelectionChanged) onSelectionChanged();
+    st.changed();
+}
+
+void InstrumentList::mouseDoubleClick (const MouseEvent& e)
+{
+    const int r = rowAt (e.position.y);
+    if (r > 0) previewOnce (st, r, this);
+}
+
+// ===========================================================================
+// InstrumentsPage
+// ===========================================================================
+
+InstrumentsPage::InstrumentsPage (EditorState& s) : st (s), list (s)
+{
+    for (auto* c : std::initializer_list<Component*> { &list, &numberLabel, &name, &prev, &next, &volume, &transpose, &finetune,
+                                                        &loop, &pingPong, &reverse, &wave, &slotBanks })
+        addAndMakeVisible (c);
+    slotBanks.onBankChanged = [this] { instrumentsChanged(); repaint(); };
+
+    numberLabel.setScreen (false);
+    prev.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (14.0f, 22.0f), c, false); };
+    next.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (14.0f, 22.0f), c, true); };
+    prev.onClick = [this] { st.proc.selectedInstrument = jmax (1, slot() - 1); st.changed(); };
+    next.onClick = [this] { st.proc.selectedInstrument = jmin (kNumInstruments - 1, slot() + 1); st.changed(); };
+
+    name.onChange = [this] (const String& t) { st.proc.getInstrument (slot()).name = t; st.proc.instrumentChanged (slot()); st.changed(); };
+
+    volume.setDragSensitivity (2.0f);
+    transpose.formatter = [] (int v) { return signedToString (v); };
+    finetune.formatter = [] (int v) { return signedToString (v); };
+    finetune.setDragSensitivity (1.5f);
+    transpose.setDragSensitivity (6.0f);
+
+    for (auto* v : { &volume, &transpose, &finetune }) v->onChange = [this] (int) { push(); };
+    for (auto* sp : { &loop, &pingPong, &reverse }) sp->onChange = [this] (bool) { push(); };
+
+    // synth controls
+    for (auto* b : { &srcSample, &srcSynth, &srcSynth2, &srcMidi }) addAndMakeVisible (b);
+    srcSynth2.onClick = [this] { setSource (srcIsSynth2); };
+
+    // SYNTH 2: knobs, each with MIDI LEARN on right-click
+    for (int p = 0; p < s2NumParams; ++p)
+    {
+        auto k = std::make_unique<PixelKnob> (synth2::label (p), synth2::maxValue (p), synth2::defaultValue (p));
+        k->formatter = [p] (int v) { return synth2::format (p, v); };
+        k->onChange = [this, p] (int v)
+        {
+            auto& in = st.proc.getInstrument (slot());
+            if (! in.isSynth2()) return;
+            in.params.s2[(size_t) p] = v;
+            st.proc.instrumentChanged (slot());
+        };
+        k->onRightClick = [this, p] { showKnobMenu (FourTrackerProcessor::kSynth2Knob + p); };
+        k->setTooltip (String (synth2::name (p)) + " - drag up/down, double-click resets, right-click: MIDI LEARN");
+        addChildComponent (*k);
+        knobs[(size_t) p] = std::move (k);
+    }
+    patchPrev.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (12.0f, 18.0f), c, false); };
+    patchNext.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (12.0f, 18.0f), c, true); };
+    patchPrev.onClick = [this] { const int n = (int) patches.size(); if (n > 0) choosePatch ((currentPatchIndex() + n - 1) % n); };
+    patchNext.onClick = [this] { const int n = (int) patches.size(); if (n > 0) choosePatch ((currentPatchIndex() + 1) % n); };
+    patchList.onClick = [this] { showPatchMenu(); };
+    patchSave.onClick = [this] { savePatchDialog(); };
+    for (auto* b : { &patchPrev, &patchNext, &patchList, &patchSave }) addChildComponent (b);
+    refreshPatches();
+    srcSample.onClick = [this] { setSource (srcIsSample); };
+    srcSynth.onClick  = [this] { setSource (srcIsSynth); };
+    srcMidi.onClick   = [this] { setSource (srcIsMidi); };
+
+    // MIDI instrument: channel and program
+    addChildComponent (midiChannelBox);
+    addChildComponent (midiProgramBox);
+    midiChannelBox.setShowSpinner (true);
+    midiProgramBox.setShowSpinner (true);
+    midiProgramBox.formatter = [] (int v) { return v == 0 ? String ("OFF") : String (v); };
+    midiChannelBox.setDragSensitivity (8.0f);
+    midiProgramBox.setDragSensitivity (3.0f);
+    midiChannelBox.onChange = [this] (int v)
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (! in.isMidi()) return;
+        if (in.name == "MIDI CH " + String (in.params.midiChannel)) in.name = "MIDI CH " + String (v);
+        in.params.midiChannel = v;
+        st.proc.instrumentChanged (slot());
+        st.changed();
+    };
+    midiProgramBox.onChange = [this] (int v)
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (! in.isMidi()) return;
+        in.params.midiProgram = v;
+        st.proc.instrumentChanged (slot());
+    };
+    for (int w = 0; w < numSynthWaves; ++w)
+    {
+        auto b = std::make_unique<PixelButton> (synthWaveName (w), PixelButton::Style::Segment, 17.0f);
+        b->icon = [w] (Graphics& g, Rectangle<float> r, Colour c) { drawWaveIcon (g, r, c, w); };
+        b->iconWidth = 70.0f;
+        b->onClick = [this, w]
+        {
+            auto& in = st.proc.getInstrument (slot());
+            in.makeSynth (w);
+            st.proc.instrumentChanged (slot());
+            previewOnce (st, slot(), this);
+            st.changed();
+        };
+        addChildComponent (*b);
+        waveButtons[(size_t) w] = std::move (b);
+    }
+    for (auto* sl : { &attack, &decay, &release })
+    {
+        sl->skew = 3.0f;
+        sl->formatter = [] (int v) { return v >= 1000 ? String (v / 1000.0, 2) + " S" : String (v) + " MS"; };
+    }
+    cutoff.formatter = [] (int v) { const double hz = 30.0 * std::pow (2.0, v / 127.0 * 9.4);
+                                    return v >= 127 ? String ("OPEN") : hz >= 1000.0 ? String (hz / 1000.0, 1) + " KHZ" : String (roundToInt (hz)) + " HZ"; };
+    for (auto* sl : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent })
+    {
+        sl->onChange = [this] (int) { pushSynth(); };
+        addChildComponent (sl);
+    }
+    // right-click a slider: MIDI LEARN a knob for it (each synth slot has its own knobs)
+    for (int p = 0; p < numSynthParams; ++p)
+        synthSliders()[(size_t) p]->onRightClick = [this, p] { showKnobMenu (p); };
+
+    wave.onClicked = [this] { previewOnce (st, slot(), this); };
+    list.onSelectionChanged = [this] { instrumentsChanged(); };
+    instrumentsChanged();
+}
+
+void InstrumentsPage::push()
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (in.isEmpty()) return;
+    in.params.volume = volume.getValue();
+    in.params.transpose = transpose.getValue();
+    in.params.fineTune = finetune.getValue();
+    in.params.loop = loop.getState();
+    in.params.pingPong = pingPong.getState();
+    in.params.reverse = reverse.getState();
+    st.proc.instrumentChanged (slot());
+}
+
+void InstrumentsPage::setSource (int source)
+{
+    auto& in = st.proc.getInstrument (slot());
+    const int now = in.isMidi() ? srcIsMidi : in.isSynth() ? srcIsSynth : in.isSynth2() ? srcIsSynth2 : srcIsSample;
+    if (source == now) { instrumentsChanged(); return; }
+
+    if (source == srcIsSynth2)
+    {
+        in.makeSynth2();
+        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW SYNTH 2 - PICK A PATCH, RIGHT-CLICK A KNOB FOR MIDI LEARN");
+        st.proc.instrumentChanged (slot());
+        st.changed();
+        return;
+    }
+
+    if (source == srcIsSynth)
+    {
+        in.makeSynth (waveSine);
+        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW SYNTH 1");
+    }
+    else if (source == srcIsMidi)
+    {
+        in.makeMidi();
+        st.setStatus ("SLOT " + hex2 (slot()) + " IS NOW A MIDI INSTRUMENT - CHOOSE THE MIDI OUTPUT ON THE MIDI / AUDIO PAGE");
+    }
+    else if (in.restoreSample())
+    {
+        st.setStatus ("SLOT " + hex2 (slot()) + " - THE SAMPLE " + in.name + " IS BACK");
+    }
+    else
+    {
+        in.clear();
+        st.setStatus ("SLOT " + hex2 (slot()) + " CLEARED - LOAD OR DROP A SAMPLE");
+    }
+    st.proc.instrumentChanged (slot());
+    st.changed();
+}
+
+void InstrumentsPage::pushSynth()
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (! in.isSynth()) return;
+    in.params.attack = attack.getValue();
+    in.params.decay = decay.getValue();
+    in.params.sustain = sustain.getValue();
+    in.params.release = release.getValue();
+    in.params.cutoff = cutoff.getValue();
+    in.params.resonance = resonance.getValue();
+    in.params.distortion = distortion.getValue();
+    in.params.accent = accent.getValue();
+    st.proc.instrumentChanged (slot());
+}
+
+void InstrumentsPage::showKnobMenu (int param)
+{
+    auto& in = st.proc.getInstrument (slot());
+    const bool isS2 = param >= FourTrackerProcessor::kSynth2Knob;
+    const int n = isS2 ? param - FourTrackerProcessor::kSynth2Knob : param;
+    if (isS2 ? ! in.isSynth2() : ! in.isSynth()) return;
+    const int cc = isS2 ? in.params.cc2[(size_t) n] : in.params.cc[(size_t) n];
+    const bool learning = st.proc.isSynthLearning (slot(), param);
+    const String pname = isS2 ? String (synth2::name (n)) : String (synthParamName (n));
+    Component* target = isS2 ? (Component*) knobs[(size_t) n].get() : (Component*) synthSliders()[(size_t) n];
+    PopupMenu m;
+    m.addSectionHeader (pname + " - SLOT " + hex2 (slot()));
+    m.addItem (1, learning ? "WAITING FOR A KNOB ... (CLICK TO CANCEL)" : "MIDI LEARN: MOVE A KNOB ON YOUR MIDI KEYBOARD");
+    if (cc >= 0) m.addItem (2, "FORGET KNOB CC " + String (cc));
+    Component::SafePointer<InstrumentsPage> safe (this);
+    const int s = slot();
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (target), [safe, param, s, learning, pname] (int chosen)
+    {
+        if (safe == nullptr || chosen <= 0) return;
+        auto& self = *safe;
+        if (chosen == 1 && learning)
+        {
+            self.st.proc.cancelSynthLearn();
+            self.st.setStatus ("MIDI LEARN CANCELLED");
+        }
+        else if (chosen == 1)
+        {
+            self.st.proc.startSynthLearn (s, param);
+            self.st.setStatus ("MIDI LEARN: MOVE A KNOB FOR " + pname + " OF SLOT " + hex2 (s));
+        }
+        else if (chosen == 2)
+        {
+            self.st.proc.forgetSynthKnob (s, param);
+            self.st.setStatus (pname + " OF SLOT " + hex2 (s) + " HAS NO KNOB NOW");
+        }
+        self.updateKnobBadges();
+        self.st.changed();
+    });
+}
+
+void InstrumentsPage::updateKnobBadges()
+{
+    auto& in = st.proc.getInstrument (slot());
+    for (int p = 0; p < numSynthParams; ++p)
+    {
+        const bool learning = in.isSynth() && st.proc.isSynthLearning (slot(), p);
+        const int cc = in.params.cc[(size_t) p];
+        synthSliders()[(size_t) p]->setBadge (learning ? String ("LEARN") : cc >= 0 ? "CC " + String (cc) : String(), learning);
+    }
+    for (int p = 0; p < s2NumParams; ++p)
+    {
+        const bool learning = in.isSynth2() && st.proc.isSynthLearning (slot(), FourTrackerProcessor::kSynth2Knob + p);
+        const int cc = in.params.cc2[(size_t) p];
+        knobs[(size_t) p]->setBadge (learning ? String ("LEARN") : cc >= 0 ? "CC " + String (cc) : String(), learning);
+    }
+}
+
+// ---- SYNTH 2 patches -------------------------------------------------------------
+
+void InstrumentsPage::refreshPatches()
+{
+    patches = synth2::allPatches();
+}
+
+int InstrumentsPage::currentPatchIndex() const
+{
+    const auto& in = st.proc.getInstrument (slot());
+    for (size_t i = 0; i < patches.size(); ++i)
+        if (patches[i].name.equalsIgnoreCase (in.name)) return (int) i;
+    return -1;
+}
+
+void InstrumentsPage::choosePatch (int index)
+{
+    if (! isPositiveAndBelow (index, (int) patches.size())) return;
+    auto& in = st.proc.getInstrument (slot());
+    in.applySynth2Patch (patches[(size_t) index]);
+    st.proc.instrumentChanged (slot());
+    st.setStatus ("PATCH " + String (index + 1) + "/" + String ((int) patches.size()) + ": " + patches[(size_t) index].name);
+    instrumentsChanged();
+    previewOnce (st, slot(), this);
+    st.changed();
+}
+
+void InstrumentsPage::showPatchMenu()
+{
+    if (patches.empty()) refreshPatches();
+    PopupMenu m, trance, italo, eighties, user;
+    for (size_t i = 0; i < patches.size(); ++i)
+    {
+        const auto& p = patches[i];
+        const int id = (int) i + 1;
+        if (! p.factory)                       user.addItem (id, p.name);
+        else if (p.name.startsWith ("TRANCE")) trance.addItem (id, p.name);
+        else if (p.name.startsWith ("ITALO"))  italo.addItem (id, p.name);
+        else if (p.name.startsWith ("80S"))    eighties.addItem (id, p.name);
+        else                                   m.addItem (id, p.name);   // INIT
+    }
+    m.addSubMenu ("TRANCE", trance);
+    m.addSubMenu ("ITALO DISCO", italo);
+    m.addSubMenu ("80S", eighties);
+    m.addSubMenu ("YOUR PATCHES", user, user.getNumItems() > 0);
+    Component::SafePointer<InstrumentsPage> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&patchList), [safe] (int chosen)
+    {
+        if (safe != nullptr && chosen > 0) safe->choosePatch (chosen - 1);
+    });
+}
+
+void InstrumentsPage::savePatchDialog()
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (! in.isSynth2()) return;
+    auto* w = new AlertWindow ("SAVE PATCH", "Name the patch. It is saved in " + String ("Documents/Four Tracker/Synth 2 Patches.").replaceCharacter ('/', File::getSeparatorChar()), MessageBoxIconType::NoIcon);
+    w->addTextEditor ("name", in.name, "NAME");
+    w->addButton ("SAVE", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("CANCEL", 0, KeyPress (KeyPress::escapeKey));
+    Component::SafePointer<InstrumentsPage> safe (this);
+    const int s = slot();
+    w->enterModalState (true, ModalCallbackFunction::create ([safe, w, s] (int result)
+    {
+        if (safe == nullptr || result != 1) return;
+        auto& self = *safe;
+        const auto name = w->getTextEditorContents ("name").trim().toUpperCase();
+        auto& inst = self.st.proc.getInstrument (s);
+        File written;
+        const auto r = synth2::savePatch (name, inst.params.s2, written);
+        if (r.failed()) { self.st.setStatus (r.getErrorMessage().toUpperCase()); self.st.changed(); return; }
+        inst.name = name;
+        self.st.proc.instrumentChanged (s);
+        self.refreshPatches();
+        self.st.setStatus ("PATCH SAVED: " + name);
+        self.instrumentsChanged();
+        self.st.changed();
+    }), true);
+}
+
+void InstrumentsPage::updateSynthVisibility()
+{
+    for (auto& k : knobs) k->setVisible (synth2Mode);
+    for (auto* b : { &patchPrev, &patchNext, &patchList, &patchSave }) b->setVisible (synth2Mode);
+    for (auto& b : waveButtons) b->setVisible (synthMode);
+    for (auto* sl : { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent }) sl->setVisible (synthMode);
+    midiChannelBox.setVisible (midiMode);
+    midiProgramBox.setVisible (midiMode);
+    wave.setVisible (! synthMode && ! midiMode && ! synth2Mode);   // the waveform buttons show the synth's shape
+    slotBanks.setVisible (! synthMode && ! midiMode && ! synth2Mode);
+    for (auto* sp : { &loop, &pingPong, &reverse })
+    {
+        sp->setEnabled (! synthMode && ! midiMode && ! synth2Mode);
+        sp->setAlpha (synthMode || midiMode || synth2Mode ? 0.35f : 1.0f);
+    }
+    wave.showMarkers = ! synthMode;     // a synth's loop is the whole cycle: no need to shade it
+    resized();
+}
+
+void InstrumentsPage::instrumentsChanged()
+{
+    auto& in = st.proc.getInstrument (slot());
+    const bool nowSynth = in.isSynth(), nowMidi = in.isMidi(), nowSynth2 = in.isSynth2();
+    if (nowSynth != synthMode || nowMidi != midiMode || nowSynth2 != synth2Mode)
+    {
+        synthMode = nowSynth; midiMode = nowMidi; synth2Mode = nowSynth2;
+        updateSynthVisibility();
+    }
+    srcSynth2.setToggleState (nowSynth2, dontSendNotification);
+    for (int p = 0; p < s2NumParams; ++p) knobs[(size_t) p]->setValue (in.params.s2[(size_t) p]);
+    srcSample.setToggleState (! nowSynth && ! nowMidi && ! nowSynth2, dontSendNotification);
+    srcSynth.setToggleState (nowSynth, dontSendNotification);
+    srcMidi.setToggleState (nowMidi, dontSendNotification);
+    midiChannelBox.setValue (in.params.midiChannel);
+    midiProgramBox.setValue (in.params.midiProgram);
+    for (int w = 0; w < numSynthWaves; ++w) waveButtons[(size_t) w]->setToggleState (nowSynth && in.params.synthWave == w, dontSendNotification);
+    attack.setValue (in.params.attack);
+    decay.setValue (in.params.decay);
+    sustain.setValue (in.params.sustain);
+    release.setValue (in.params.release);
+    cutoff.setValue (in.params.cutoff);
+    resonance.setValue (in.params.resonance);
+    distortion.setValue (in.params.distortion);
+    accent.setValue (in.params.accent);
+    updateKnobBadges();
+    numberLabel.setText (formatNumber (slot(), 2, st.hex()));
+    name.setText (in.name);
+    volume.setValue (in.params.volume);
+    transpose.setValue (in.params.transpose);
+    finetune.setValue (in.params.fineTune);
+    loop.setState (in.params.loop);
+    pingPong.setState (in.params.pingPong);
+    reverse.setState (in.params.reverse);
+    wave.setSample (in.data, &in.params);
+    repaint();
+}
+
+void InstrumentsPage::refresh() {}
+
+void InstrumentsPage::paint (Graphics& g)
+{
+    auto& in = st.proc.getInstrument (slot());
+
+    Theme::drawPanel (g, header.toFloat());
+    Theme::text (g, "INSTRUMENT", header.toFloat().withTrimmedLeft (16.0f), 30.0f, Theme::ink, Justification::centredLeft, true);
+    {
+        auto nb = numberLabel.getBounds().toFloat().expanded (2.0f);
+        Theme::drawRaised (g, nb, Theme::buttonLight);
+    }
+
+    Theme::drawPanel (g, paramsPanel.toFloat());
+    labelLeft (g, "VOLUME",    { paramsPanel.getX() + 26, volume.getY(), 180, volume.getHeight() }, 21.0f);
+    labelLeft (g, "TRANSPOSE", { paramsPanel.getX() + 26, transpose.getY(), 180, transpose.getHeight() }, 21.0f);
+    labelLeft (g, "FINE TUNE", { paramsPanel.getX() + 26, finetune.getY(), 180, finetune.getHeight() }, 21.0f);
+
+    Theme::drawPanel (g, togglesPanel.toFloat());
+    labelLeft (g, "LOOP",      { togglesPanel.getX() + 18, loop.getY(), 160, loop.getHeight() }, 18.0f);
+    labelLeft (g, "PING PONG", { togglesPanel.getX() + 18, pingPong.getY(), 160, pingPong.getHeight() }, 18.0f);
+    labelLeft (g, "REVERSE",   { togglesPanel.getX() + 18, reverse.getY(), 160, reverse.getHeight() }, 18.0f);
+
+    Theme::drawPanel (g, infoPanel.toFloat());
+    Theme::text (g, "SAMPLE INFO", infoPanel.toFloat().translated (10.0f, 12.0f).withHeight (22.0f), 21.0f, Theme::ink, Justification::topLeft);
+    infoTable (g, infoPanel.toFloat().withTrimmedTop (42.0f).reduced (8.0f, 6.0f), in);
+
+    Theme::drawPanel (g, dropBar.toFloat());
+    labelLeft (g, "SOURCE", { dropBar.getX() + 18, dropBar.getY(), 120, dropBar.getHeight() }, 18.0f);
+    {
+        g.saveState();
+        auto tr = dropBar.toFloat().withTrimmedLeft ((float) (srcMidi.getRight() - dropBar.getX()) + 22.0f).withTrimmedRight (12.0f);
+        g.reduceClipRegion (tr.toNearestInt());
+        Theme::text (g, in.isMidi() ? String ("NOTES GO TO MIDI OUT")
+                       : in.isSynth() ? String ("SYNTH 1 - WAVEFORM, ENVELOPE AND FILTER")
+                       : in.isSynth2() ? String ("2 OSC, PWM, FILTER, LFO, FX")
+                       : in.isEmpty() ? String ("DROP AUDIO FILES HERE OR PRESS LOAD   (WAV AIFF FLAC OGG MP3)")
+                       : (in.sourcePath.isNotEmpty() ? in.sourcePath.toUpperCase() : String ("BUILT-IN DEMO SOUND - DROP A FILE TO REPLACE IT")),
+                     tr, 16.0f, Theme::ink.withAlpha (0.75f), Justification::centredLeft);
+        g.restoreState();
+    }
+
+    Theme::drawPanel (g, slotPanel.toFloat());
+
+    if (midiMode)
+    {
+        Theme::text (g, "MIDI OUT", slotPanel.toFloat().translated (16.0f, 14.0f).withHeight (26.0f), 25.0f, Theme::ink, Justification::topLeft, true);
+        labelLeft (g, "MIDI CHANNEL", { midiChannelBox.getX() - 250, midiChannelBox.getY(), 240, midiChannelBox.getHeight() }, 19.0f);
+        labelLeft (g, "PROGRAM",      { midiProgramBox.getX() - 250, midiProgramBox.getY(), 240, midiProgramBox.getHeight() }, 19.0f);
+        auto info = Rectangle<float> ((float) midiChannelBox.getRight() + 40.0f, (float) midiChannelBox.getY(),
+                                      (float) slotPanel.getRight() - midiChannelBox.getRight() - 56.0f, 220.0f);
+        Theme::drawScreen (g, info);
+        const char* lines[] = { "NOTES ARE SENT AS MIDI:",
+                                "STANDALONE: MIDI OUT ON THE MIDI / AUDIO PAGE",
+                                "PLUGIN: TO YOUR DAW",
+                                "C-4 = NOTE 60, VOLUME / 0C = VELOCITY",
+                                "=== OR A NEW NOTE = NOTE OFF",
+                                "PROGRAM: OFF = NO PROGRAM CHANGE" };
+        auto r = info.reduced (16.0f, 12.0f);
+        g.saveState();
+        g.reduceClipRegion (info.reduced (4.0f).toNearestInt());
+        for (auto* l : lines) Theme::text (g, l, r.removeFromTop (32.0f), 15.0f, Theme::screenText, Justification::centredLeft);
+        g.restoreState();
+        return;
+    }
+
+    if (synth2Mode)
+    {
+        Theme::text (g, "SYNTH 2", Rectangle<float> ((float) slotPanel.getX() + 16.0f, (float) patchNameBox.getY(), 140.0f, (float) patchNameBox.getHeight()),
+                     25.0f, Theme::ink, Justification::centredLeft, true);
+        Theme::drawScreen (g, patchNameBox.toFloat());
+        const int idx = currentPatchIndex();
+        String shown = in.name.toUpperCase();
+        if (idx >= 0 && ! patches[(size_t) idx].factory) shown = "USER: " + shown;
+        Theme::text (g, shown, patchNameBox.toFloat().reduced (14.0f, 0.0f), 20.0f, Theme::screenText, Justification::centredLeft);
+        for (auto& kg : knobGroups)
+        {
+            auto a = kg.area.toFloat();
+            g.setColour (Theme::panelEdgeLo);
+            g.drawLine (a.getX(), a.getY() + 9.0f, a.getRight(), a.getY() + 9.0f, 1.0f);
+            const float tw = (float) kg.name.length() * 11.0f + 12.0f;
+            g.setColour (Theme::panel);
+            g.fillRect (Rectangle<float> (a.getX() + 6.0f, a.getY(), tw, 18.0f));
+            Theme::text (g, kg.name, Rectangle<float> (a.getX() + 10.0f, a.getY(), tw, 18.0f), 14.0f, Theme::ink, Justification::centredLeft, true);
+        }
+        return;
+    }
+
+    if (synthMode)
+    {
+        Theme::text (g, "SYNTH", slotPanel.toFloat().translated (16.0f, 14.0f).withHeight (26.0f), 25.0f, Theme::ink, Justification::topLeft, true);
+        auto lab = [&] (const String& t, const Component& c)
+        {
+            labelLeft (g, t, { c.getX() - 168, c.getY(), 164, c.getHeight() }, 17.0f);
+        };
+        lab ("ATTACK", attack); lab ("DECAY", decay); lab ("SUSTAIN", sustain); lab ("RELEASE", release);
+        lab ("CUTOFF", cutoff); lab ("RESONANCE", resonance);
+        lab ("DISTORTION", distortion); lab ("ACCENT", accent);
+        Theme::text (g, "RIGHT-CLICK A SLIDER: MIDI LEARN A KNOB",
+                     slotPanel.toFloat().withTrimmedLeft (160.0f).withTrimmedRight (16.0f).translated (0.0f, 16.0f).withHeight (22.0f),
+                     15.0f, Theme::ink.withAlpha (0.6f), Justification::topRight);
+        return;
+    }
+
+    Theme::text (g, "INSTRUMENT SLOT", slotPanel.toFloat().translated (16.0f, 14.0f).withHeight (26.0f), 25.0f, Theme::ink, Justification::topLeft, true);
+
+    // slot grid: 4 columns x 4 rows, the bank of the selected slot
+    slotBanks.sync();
+    Theme::drawScreen (g, slotGrid.toFloat());
+    const float cw = (slotGrid.getWidth() - 8.0f) / 4.0f, rh = (slotGrid.getHeight() - 8.0f) / 4.0f;
+    const int first = BankButtons::bankOf (slot()) * kSlotsPerBank;
+    for (int i = first + 1; i <= first + kSlotsPerBank; ++i)
+    {
+        const int col = (i - first - 1) / 4, row = (i - first - 1) % 4;
+        auto cell = Rectangle<float> (slotGrid.getX() + 4.0f + col * cw, slotGrid.getY() + 4.0f + row * rh, cw, rh).reduced (6.0f, 2.0f);
+        const bool sel = i == slot();
+        g.setColour (sel ? Theme::buttonLight : Colour (0xff111215));
+        g.fillRect (cell);
+        g.setColour (Colour (0xff2a2c31));
+        g.fillRect (cell.getX() + 62.0f, cell.getY(), 1.5f, cell.getHeight());
+        const auto colr = sel ? Theme::ink : Theme::screenText;
+        const auto& si = st.proc.getInstrument (i);
+        Theme::text (g, formatNumber (i, 2, st.hex()), cell.withWidth (62.0f), 20.0f, colr, Justification::centred);
+        Theme::text (g, si.isEmpty() ? String ("---") : si.name.substring (0, 11), cell.withTrimmedLeft (80.0f), 20.0f, colr, Justification::centredLeft);
+    }
+}
+
+void InstrumentsPage::mouseDown (const MouseEvent& e)
+{
+    if (synthMode || midiMode || synth2Mode || ! slotGrid.contains (e.getPosition())) return;
+    const float cw = (slotGrid.getWidth() - 8.0f) / 4.0f, rh = (slotGrid.getHeight() - 8.0f) / 4.0f;
+    const int col = jlimit (0, 3, (int) ((e.position.x - slotGrid.getX() - 4.0f) / cw));
+    const int row = jlimit (0, 3, (int) ((e.position.y - slotGrid.getY() - 4.0f) / rh));
+    const int i = BankButtons::bankOf (slot()) * kSlotsPerBank + col * 4 + row + 1;
+    st.proc.selectedInstrument = i;
+    if (e.getNumberOfClicks() > 1) previewOnce (st, i, this);
+    st.changed();
+}
+
+void InstrumentsPage::resized()
+{
+    list.setBounds (0, 0, 390, getHeight());
+    header = { 398, 0, getWidth() - 398, 66 };
+    numberLabel.setBounds (header.getX() + 296, 9, 70, 48);
+    name.setBounds (header.getX() + 380, 9, header.getWidth() - 380 - 166, 48);
+    prev.setBounds (header.getRight() - 160, 9, 74, 48);
+    next.setBounds (header.getRight() - 80, 9, 74, 48);
+
+    paramsPanel  = { 398, 74, 440, 210 };
+    togglesPanel = { 844, 74, 346, 210 };
+    infoPanel    = { 1196, 74, getWidth() - 1196, 210 };
+
+    volume.setBounds (paramsPanel.getX() + 206, 92, 130, 50);
+    transpose.setBounds (paramsPanel.getX() + 206, 152, 130, 50);
+    finetune.setBounds (paramsPanel.getX() + 206, 214, 130, 50);
+
+    loop.setBounds (togglesPanel.getX() + 182, 92, 152, 52);
+    pingPong.setBounds (togglesPanel.getX() + 182, 152, 152, 52);
+    reverse.setBounds (togglesPanel.getX() + 182, 214, 152, 52);
+
+    dropBar  = { 398, 292, getWidth() - 398, 56 };
+    slotPanel = { 398, 356, getWidth() - 398, getHeight() - 356 };
+    slotGrid = { slotPanel.getX() + 12, slotPanel.getY() + 52, slotPanel.getWidth() - 24, 196 };
+    slotBanks.setBounds (slotPanel.getRight() - 12 - 4 * 104, slotPanel.getY() + 10, 4 * 104 - 6, 34);
+    {
+        const int bx = dropBar.getX() + 130, by = dropBar.getY() + 7, bh = dropBar.getHeight() - 14, bw = 118;
+        srcSample.setBounds (bx, by, bw, bh);
+        srcSynth.setBounds (bx + bw + 6, by, bw, bh);
+        srcSynth2.setBounds (bx + 2 * (bw + 6), by, bw, bh);
+        srcMidi.setBounds (bx + 3 * (bw + 6), by, bw, bh);
+    }
+
+    if (midiMode)
+    {
+        midiChannelBox.setBounds (slotPanel.getX() + 280, slotPanel.getY() + 70, 150, 56);
+        midiProgramBox.setBounds (slotPanel.getX() + 280, slotPanel.getY() + 140, 150, 56);
+        return;
+    }
+
+    if (synth2Mode)
+    {
+        // title + patch bar on one row, then two rows of knobs in groups
+        const int x0 = slotPanel.getX() + 12, w = slotPanel.getWidth() - 24, py = slotPanel.getY() + 8;
+        patchPrev.setBounds (x0 + 168, py, 52, 40);
+        patchNameBox = { x0 + 226, py, w - 226 - 58 - 130 - 160 - 16, 40 };
+        patchNext.setBounds (patchNameBox.getRight() + 6, py, 52, 40);
+        patchList.setBounds (patchNext.getRight() + 10, py, 130, 40);
+        patchSave.setBounds (patchList.getRight() + 8, py, x0 + w - patchList.getRight() - 8, 40);
+
+        knobGroups.clear();
+        const int gap = 14, kh = jmin (128, (slotPanel.getBottom() - (py + 52) - 2 * 18 - 10) / 2);
+        auto layoutRow = [&] (int y, std::initializer_list<std::pair<const char*, std::initializer_list<int>>> groups)
+        {
+            int count = 0, ngroups = 0;
+            for (auto& g : groups) { count += (int) g.second.size(); ++ngroups; }
+            const int kw = (w - gap * (ngroups - 1)) / jmax (1, count);
+            int x = x0;
+            for (auto& g : groups)
+            {
+                const int gx = x;
+                for (int p : g.second) { knobs[(size_t) p]->setBounds (x, y + 21, kw, kh - 3); x += kw; }
+                knobGroups.push_back ({ g.first, { gx, y, x - gx, kh + 18 } });
+                x += gap;
+            }
+        };
+        layoutRow (py + 50, { { "OSC 1", { s2Osc1Wave, s2Osc1PW } },
+                              { "OSC 2", { s2Osc2Wave, s2Osc2Semi, s2Osc2Fine, s2OscMix } },
+                              { "FILTER", { s2Cutoff, s2Reso, s2EnvAmt, s2FDecay } },
+                              { "LFO", { s2LfoShape, s2LfoSync, s2LfoRate } } });
+        layoutRow (py + 50 + kh + 26, { { "AMP", { s2Attack, s2Decay, s2Sustain, s2Release } },
+                                        { "LFO TO", { s2LfoPitch, s2LfoPwm, s2LfoFilter } },
+                                        { "CHORUS", { s2Chorus } },
+                                        { "DELAY", { s2DelayTime, s2DelayFb, s2DelayMix } },
+                                        { "REVERB", { s2ReverbSize, s2ReverbMix } } });
+        return;
+    }
+
+    if (! synthMode)
+    {
+        wave.setBounds (slotPanel.getX() + 6, slotGrid.getBottom() + 10, slotPanel.getWidth() - 12, slotPanel.getBottom() - slotGrid.getBottom() - 16);
+        return;
+    }
+
+    // synth: waveform buttons, then envelope (left) and filter + waveform view (right)
+    const int x0 = slotPanel.getX() + 12, w = slotPanel.getWidth() - 24;
+    const int bw = (w - 4 * 8) / 5;
+    for (int i = 0; i < numSynthWaves; ++i)
+        waveButtons[(size_t) i]->setBounds (x0 + i * (bw + 8), slotPanel.getY() + 50, bw, 62);
+
+    const int rowY = slotPanel.getY() + 126, rowH = 46, step = 54;
+    const int colW = (w - 20) / 2;
+    const int lx = x0 + 168, lw = colW - 168;
+    attack.setBounds  (lx, rowY,            lw, rowH);
+    decay.setBounds   (lx, rowY + step,     lw, rowH);
+    sustain.setBounds (lx, rowY + step * 2, lw, rowH);
+    release.setBounds (lx, rowY + step * 3, lw, rowH);
+
+    const int rx = x0 + colW + 20 + 168, rw = colW - 168;
+    cutoff.setBounds     (rx, rowY,            rw, rowH);
+    resonance.setBounds  (rx, rowY + step,     rw, rowH);
+    distortion.setBounds (rx, rowY + step * 2, rw, rowH);
+    accent.setBounds     (rx, rowY + step * 3, rw, rowH);
+}
+
+// ===========================================================================
+// ResampleDialog (RE-SAMPLE on the Sample Edit page)
+// ===========================================================================
+
+ResampleDialog::ResampleDialog (EditorState& s) : st (s)
+{
+    for (auto* c : std::initializer_list<Component*> { &patternBox, &fromBox, &toBox, &range, &trackMode, &blockBtn, &loopBtn, &cutBtn, &ringBtn, &normBtn, &goBtn, &cancelBtn })
+        addAndMakeVisible (c);
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        auto b = std::make_unique<PixelButton> (String (c + 1), PixelButton::Style::Segment, 18.0f);
+        b->setClickingTogglesState (true);
+        b->onClick = [this] { repaint(); };
+        addAndMakeVisible (*b);
+        trackButtons[(size_t) c] = std::move (b);
+    }
+    for (auto* b : { &loopBtn, &cutBtn, &ringBtn, &normBtn }) b->setClickingTogglesState (true);
+    for (auto* b : { &loopBtn, &cutBtn, &ringBtn }) { b->setRadioGroupId (7301); b->onClick = [this] { repaint(); }; }
+    loopBtn.setToggleState (true, dontSendNotification);
+
+    auto fmt = [this] (int v) { return formatNumber (v, 2, st.hex()); };
+    auto parse = [this] (const String& t, bool& ok)
+    {
+        const auto txt = t.trim();
+        ok = txt.isNotEmpty() && txt.containsOnly (st.hex() ? "0123456789abcdefABCDEF" : "0123456789");
+        return st.hex() ? txt.getHexValue32() : txt.getIntValue();
+    };
+    for (auto* v : { &patternBox, &fromBox, &toBox })
+    {
+        v->formatter = fmt;
+        v->parser = parse;
+        v->setShowSpinner (true);
+        v->setDragSensitivity (8.0f);
+        v->setJustification (Justification::centred);
+    }
+    patternBox.onChange = [this] (int) { patternChanged(); };
+    fromBox.onChange = [this] (int v) { if (toBox.getValue() < v) toBox.setValue (v); };
+    toBox.onChange = [this] (int v) { if (fromBox.getValue() > v) fromBox.setValue (v); };
+    range.onChange = [this] (bool) { patternChanged(); };
+    trackMode.onChange = [this] (bool) { updateEnabled(); };
+    blockBtn.onClick = [this] { useBlock(); };
+    goBtn.onClick = [this] { render(); };
+    cancelBtn.onClick = [this] { close(); };
+    setVisible (false);
+}
+
+void ResampleDialog::open()
+{
+    slot = st.proc.selectedInstrument;
+    patternBox.setValue (st.viewPattern());
+    range.setState (true);
+    trackMode.setState (true);
+    for (int c = 0; c < kNumChannels; ++c) trackButtons[(size_t) c]->setToggleState (false, dontSendNotification);   // tick the ones you want
+    patternChanged();
+    setVisible (true);
+    toFront (false);
+    repaint();
+}
+
+void ResampleDialog::close()
+{
+    setVisible (false);
+    st.changed();
+}
+
+void ResampleDialog::patternChanged()
+{
+    const int rows = st.engine().getPattern (patternBox.getValue()).getNumRows();
+    fromBox.setRange (0, rows - 1);
+    toBox.setRange (0, rows - 1);
+    if (range.getState()) { fromBox.setValue (0); toBox.setValue (rows - 1); }
+    updateEnabled();
+}
+
+void ResampleDialog::updateEnabled()
+{
+    const bool rows = ! range.getState();
+    for (auto* v : { &fromBox, &toBox }) { v->setEnabled (rows); v->setAlpha (rows ? 1.0f : 0.4f); }
+    const bool choose = ! trackMode.getState();
+    const int used = st.numChannels();
+    for (int c = 0; c < kNumChannels; ++c)
+    {
+        auto& b = *trackButtons[(size_t) c];
+        b.setEnabled (choose && c < used);
+        b.setAlpha (c >= used ? 0.25f : (choose ? 1.0f : 0.5f));
+    }
+    blockBtn.setEnabled (st.hasSelection);
+    blockBtn.setAlpha (st.hasSelection ? 1.0f : 0.4f);
+    goBtn.setButtonText (st.proc.getInstrument (slot).isEmpty() ? "RE-SAMPLE" : "RE-SAMPLE (REPLACE)");
+    repaint();
+}
+
+void ResampleDialog::useBlock()
+{
+    if (! st.hasSelection) return;
+    patternBox.setValue (st.viewPattern());
+    range.setState (false);
+    patternChanged();
+    fromBox.setValue (jmin (st.selRow0, st.selRow1));
+    toBox.setValue (jmax (st.selRow0, st.selRow1));
+    trackMode.setState (false);
+    for (int c = 0; c < kNumChannels; ++c)
+        trackButtons[(size_t) c]->setToggleState (c >= jmin (st.selCh0, st.selCh1) && c <= jmax (st.selCh0, st.selCh1), dontSendNotification);
+    updateEnabled();
+}
+
+juce::uint32 ResampleDialog::chosenTracks() const
+{
+    if (trackMode.getState()) return 0xffffu;
+    juce::uint32 m = 0;
+    for (int c = 0; c < kNumChannels; ++c)
+        if (trackButtons[(size_t) c]->getToggleState()) m |= 1u << c;
+    return m;
+}
+
+FourTrackerProcessor::ResampleRequest ResampleDialog::request() const
+{
+    FourTrackerProcessor::ResampleRequest r;
+    r.pattern = patternBox.getValue();
+    r.fromRow = fromBox.getValue();
+    r.toRow = toBox.getValue();
+    r.tracks = chosenTracks();
+    r.ending = cutBtn.getToggleState() ? FourTrackerProcessor::ResampleRequest::cutEnd
+             : ringBtn.getToggleState() ? FourTrackerProcessor::ResampleRequest::ringOut
+                                        : FourTrackerProcessor::ResampleRequest::loopEnd;
+    r.normalise = normBtn.getToggleState();
+    return r;
+}
+
+void ResampleDialog::render()
+{
+    bool ok = false;
+    const auto msg = st.proc.resampleInto (slot, request(), ok);
+    st.setStatus (msg);
+    if (ok)
+    {
+        setVisible (false);
+        if (onDone) onDone();
+    }
+    st.changed();
+    repaint();
+}
+
+bool ResampleDialog::handleKey (const KeyPress& k)
+{
+    if (! isVisible()) return false;
+    if (k.getKeyCode() == KeyPress::escapeKey) { close(); return true; }
+    if (k.getKeyCode() == KeyPress::returnKey) { render(); return true; }
+    return true;   // the note keys etc. stay out while the dialog is open
+}
+
+void ResampleDialog::paint (Graphics& g)
+{
+    g.fillAll (Colours::black.withAlpha (0.45f));
+    Theme::drawPanel (g, panel.toFloat());
+    auto p = panel.toFloat();
+    Theme::text (g, "RE-SAMPLE INTO " + formatNumber (slot, 2, st.hex()), { p.getX() + 20.0f, p.getY() + 14.0f, 700.0f, 34.0f }, 30.0f,
+                 Theme::ink, Justification::centredLeft, true);
+    Theme::text (g, "PLAYS THE ROWS AND TRACKS YOU CHOOSE AND MAKES A SAMPLE OF THEM",
+                 { p.getX() + 22.0f, p.getY() + 56.0f, p.getWidth() - 40.0f, 20.0f }, 15.0f, Theme::ink.withAlpha (0.7f));
+
+    auto label = [&] (const String& t, Component& c, float w)
+    {
+        Theme::text (g, t, { (float) c.getX() - w, (float) c.getY(), w - 10.0f, (float) c.getHeight() }, 18.0f, Theme::ink, Justification::centredRight);
+    };
+    label ("PATTERN", patternBox, 120.0f);
+    label ("FROM ROW", fromBox, 130.0f);
+    label ("TO ROW", toBox, 96.0f);
+    Theme::text (g, "TRACKS", { p.getX() + 20.0f, (float) trackMode.getY(), 110.0f, (float) trackMode.getHeight() }, 18.0f, Theme::ink, Justification::centredLeft);
+    Theme::text (g, "ENDING", { p.getX() + 20.0f, (float) loopBtn.getY(), 110.0f, (float) loopBtn.getHeight() }, 18.0f, Theme::ink, Justification::centredLeft);
+    {
+        const String why = cutBtn.getToggleState() ? "EXACTLY THE ROWS, CUT OFF AT THE END"
+                         : ringBtn.getToggleState() ? "LONGER: THE SOUND RINGS OUT (UP TO 4 S)"
+                                                    : "EXACTLY THE ROWS, AS THE PATTERN SOUNDS WHEN IT LOOPS: NO SEAM";
+        Theme::text (g, why, { (float) loopBtn.getX(), (float) loopBtn.getBottom() + 6.0f, p.getRight() - loopBtn.getX() - 20.0f, 20.0f },
+                     14.0f, Theme::ink.withAlpha (0.7f));
+    }
+    Theme::text (g, "VST EFFECTS AND MIDI INSTRUMENTS ARE NOT IN THE SAMPLE",
+                 { p.getX() + 22.0f, (float) goBtn.getY() - 40.0f, p.getWidth() - 44.0f, 22.0f }, 14.0f, Theme::ink.withAlpha (0.7f));
+    if (! trackMode.getState() && chosenTracks() == 0)
+        Theme::text (g, "CHOOSE AT LEAST ONE TRACK", { (float) trackButtons[8]->getRight() + 16.0f, (float) trackButtons[8]->getY(), 300.0f, (float) trackButtons[8]->getHeight() },
+                     15.0f, Colour (0xffd9342b), Justification::centredLeft);
+}
+
+void ResampleDialog::resized()
+{
+    const int w = jmin (1000, getWidth() - 30), h = jmin (640, getHeight() - 24);
+    panel = Rectangle<int> (w, h).withCentre (getLocalBounds().getCentre());
+    const int x = panel.getX(), y = panel.getY();
+    patternBox.setBounds (x + 140, y + 98, 140, 48);
+    range.setBounds (x + 310, y + 98, 440, 48);
+    blockBtn.setBounds (panel.getRight() - 210, y + 98, 190, 48);
+    fromBox.setBounds (x + 450, y + 158, 140, 48);
+    toBox.setBounds (x + 730, y + 158, 140, 48);
+    trackMode.setBounds (x + 140, y + 236, 460, 48);
+    const int bw = 54, bh = 46, gap = 6, bx = x + 140, by = y + 296;
+    for (int c = 0; c < kNumChannels; ++c)
+        trackButtons[(size_t) c]->setBounds (bx + (c % 8) * (bw + gap), by + (c / 8) * (bh + gap), bw, bh);
+    loopBtn.setBounds (x + 140, by + 2 * (bh + gap) + 20, 120, 46);
+    cutBtn.setBounds (loopBtn.getRight() + 6, loopBtn.getY(), 110, 46);
+    ringBtn.setBounds (cutBtn.getRight() + 6, loopBtn.getY(), 160, 46);
+    normBtn.setBounds (ringBtn.getRight() + 40, loopBtn.getY(), 180, 46);
+    goBtn.setBounds (panel.getRight() - 20 - 320, panel.getBottom() - 20 - 56, 320, 56);
+    cancelBtn.setBounds (goBtn.getX() - 170, goBtn.getY(), 160, 56);
+}
+
+// ===========================================================================
+// OffsetCalculator
+// ===========================================================================
+
+namespace
+{
+    constexpr int kOffsetSteps[] = { 4, 8, 16, 32, 64 };
+    const Colour kOffsetWarn { 0xffd9342b };
+}
+
+OffsetCalculator::OffsetCalculator (EditorState& s, WaveformView& w) : st (s), wave (w)
+{
+    for (size_t i = 0; i < stepButtons.size(); ++i)
+    {
+        auto b = std::make_unique<PixelButton> (String (kOffsetSteps[i]), PixelButton::Style::Segment, 18.0f);
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (7302);
+        b->setComponentID ("steps" + String (kOffsetSteps[i]));
+        const int n = kOffsetSteps[i];
+        b->onClick = [this, n] { setSteps (n); };
+        addAndMakeVisible (*b);
+        stepButtons[i] = std::move (b);
+    }
+    for (auto* c : { &playBtn, &writeBtn, &closeBtn, &popBtn }) addAndMakeVisible (c);
+    popBtn.setComponentID ("offsetPop");
+    popBtn.onClick = [this] { popOut(); };
+    writeBtn.setComponentID ("offsetWrite");
+    playBtn.onClick = [this] { select (selected, true); };
+    writeBtn.onClick = [this] { writeAtCursor(); };
+    closeBtn.onClick = [this] { close(); };
+    setSteps (16);
+    setVisible (false);
+}
+
+int OffsetCalculator::codeFor (int step, int numSteps, int len)
+{
+    if (numSteps <= 0 || len <= 0) return 0;
+    const double frames = (double) step * len / numSteps;
+    const int code = roundToInt (frames / 256.0);
+    return code > 255 ? -1 : code;
+}
+
+int OffsetCalculator::length() const
+{
+    const auto& in = st.proc.getInstrument (st.proc.selectedInstrument);
+    if (in.isEmpty() || in.isSynth() || in.isSynth2()) return 0;
+    return jmax (0, jmin (in.params.end, in.data->getLength() - 1) - in.params.start + 1);
+}
+
+void OffsetCalculator::open()
+{
+    selected = 0;
+    wave.zoomFit();                 // every step in view
+    setVisible (true);
+    sampleChanged();
+    toFront (false);
+    st.setStatus ("OFFSET: CLICK A STEP TO HEAR IT - ENTER WRITES IT AT THE CURSOR");
+    st.changed();
+}
+
+void OffsetCalculator::close()
+{
+    if (! isVisible()) return;
+    setVisible (false);
+    wave.setGrid ({}, -1);
+    st.engine().requestStopPreview();
+    if (onClose) onClose();
+    st.changed();
+}
+
+void OffsetCalculator::setSteps (int n)
+{
+    steps = jlimit (1, 64, n);
+    for (size_t i = 0; i < stepButtons.size(); ++i)
+        stepButtons[i]->setToggleState (kOffsetSteps[i] == steps, dontSendNotification);
+    selected = jmin (selected, steps - 1);
+    resized();
+    updateGrid();
+    repaint();
+}
+
+void OffsetCalculator::sampleChanged()
+{
+    updateGrid();
+    repaint();
+}
+
+void OffsetCalculator::updateGrid()
+{
+    if (! isVisible()) { wave.setGrid ({}, -1); return; }   // the step lines only show while the calculator is open
+    const int len = length();
+    if (len <= 0) { wave.setGrid ({}, -1); return; }
+    const auto& p = st.proc.getInstrument (st.proc.selectedInstrument).params;
+    std::vector<int> frames;
+    for (int i = 0; i < steps; ++i)
+    {
+        const int v = (int) ((double) i * len / steps);
+        frames.push_back (p.reverse ? p.end - v : p.start + v);
+    }
+    wave.setGrid (std::move (frames), selected);
+}
+
+void OffsetCalculator::select (int step, bool play)
+{
+    selected = jlimit (0, steps - 1, step);
+    updateGrid();
+    repaint();
+    const int len = length();
+    if (! play || len <= 0) return;
+    const int code = codeFor (selected, steps, len);
+    const int at = code < 0 ? (int) ((double) selected * len / steps) : code * 256;
+    st.engine().requestPreviewAt (st.proc.selectedInstrument, kNativeNote, at);
+    st.setStatus (code < 0 ? "STEP " + String (selected + 1) + ": 09FF CAN'T REACH THIS FAR"
+                           : "STEP " + String (selected + 1) + (selected == 0 ? ": THE START (NO 09 NEEDED)" : ": 09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase()));
+    st.changed();
+}
+
+void OffsetCalculator::writeAtCursor()
+{
+    const int len = length();
+    if (len <= 0) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+    const int code = codeFor (selected, steps, len);
+    if (code < 0) { st.setStatus ("STEP " + String (selected + 1) + " IS PAST 09FF - CUT THE SAMPLE SHORTER"); st.changed(); return; }
+
+    const int pat = st.viewPattern();
+    auto& pattern = st.engine().getPattern (pat);
+    const int rows = jmax (1, pattern.getNumRows());
+    const int row = jlimit (0, rows - 1, st.cursorRow), ch = jlimit (0, st.numChannels() - 1, st.cursorCh);
+    st.pushUndo (pat);
+    {
+        const ScopedLock sl (st.engine().getDataLock());
+        auto& c = pattern.at (row, ch);
+        if (c.note == kNoteNone || c.note == kNoteOff) c.note = (uint8_t) kNativeNote;
+        c.inst = (uint8_t) st.proc.selectedInstrument;
+        if (selected == 0) { if (c.fx == 0x09) { c.fx = 0; c.param = 0; } }   // 0900 would repeat the last offset
+        else { c.fx = 0x09; c.param = (uint8_t) code; }
+    }
+    st.setStatus ("WROTE STEP " + String (selected + 1) + (selected == 0 ? String() : " (09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase() + ")")
+                  + " AT ROW " + formatNumber (row, 2, st.hex()) + " CH" + String (ch + 1));
+    st.cursorRow = (row + jmax (1, st.editStep)) % rows;
+    selected = (selected + 1) % steps;     // ready for the next slice
+    updateGrid();
+    repaint();
+    st.changed();
+}
+
+OffsetChart::OffsetChart (const String& t, int n, std::vector<int> c) : title (t), steps (n), codes (std::move (c))
+{
+    const int cols = columns(), rows = (steps + cols - 1) / cols;
+    setSize (24 + cols * 112, 58 + rows * 50 + 30);
+}
+
+void OffsetChart::paint (Graphics& g)
+{
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    auto fit = [&] (const String& t, Rectangle<float> r, float h, Colour c, Justification j, bool bold)
+    {
+        Theme::text (g, t, r, jmin (h, h * (r.getWidth() - 2.0f) / jmax (1.0f, PixelFont::getWidth (t, h))), c, j, bold);
+    };
+    fit (title, { 12.0f, 8.0f, (float) getWidth() - 24.0f, 22.0f }, 18.0f, Theme::ink, Justification::centredLeft, true);
+    fit (String (steps) + " STEPS - NOTE + SLOT + CODE ON THE ROW", { 12.0f, 30.0f, (float) getWidth() - 24.0f, 18.0f }, 13.0f,
+         Theme::ink.withAlpha (0.65f), Justification::centredLeft, false);
+    const int cols = columns();
+    for (int i = 0; i < steps; ++i)
+    {
+        const auto r = Rectangle<float> (12.0f + (i % cols) * 112.0f, 56.0f + (i / cols) * 50.0f, 108.0f, 46.0f);
+        const int code = i < (int) codes.size() ? codes[(size_t) i] : -1;
+        const bool beat = i % 4 == 0;     // the first step of each beat stands out
+        Theme::drawScreen (g, r);
+        fit (String (i + 1), r.withWidth (40.0f).withTrimmedLeft (7.0f), 15.0f, beat ? Theme::screenText : Theme::screenDim, Justification::centredLeft, beat);
+        const String txt = i == 0 ? "START" : code < 0 ? "--" : "09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase();
+        fit (txt, r.withTrimmedLeft (40.0f).withTrimmedRight (6.0f), 19.0f, code < 0 ? Colour (0xffd9342b) : Theme::screenText, Justification::centred, true);
+    }
+    fit ("STEP 1: NO 09 (0900 REPEATS THE LAST OFFSET)", { 12.0f, (float) getHeight() - 26.0f, (float) getWidth() - 24.0f, 18.0f }, 13.0f,
+         Theme::ink.withAlpha (0.65f), Justification::centredLeft, false);
+}
+
+namespace
+{
+    struct OffsetChartWindow : public DocumentWindow
+    {
+        OffsetChartWindow (const String& name, OwnedArray<DocumentWindow>& owner)
+            : DocumentWindow (name, Theme::panel, DocumentWindow::closeButton), list (owner) {}
+        void closeButtonPressed() override { list.removeObject (this); }   // deletes this window
+        OwnedArray<DocumentWindow>& list;
+    };
+}
+
+std::unique_ptr<OffsetChart> OffsetCalculator::makeChart() const
+{
+    const int len = length();
+    if (len <= 0) return {};
+    const int slotNo = st.proc.selectedInstrument;
+    std::vector<int> codes;
+    for (int i = 0; i < steps; ++i) codes.push_back (codeFor (i, steps, len));
+    return std::make_unique<OffsetChart> (formatNumber (slotNo, 2, st.hex()) + " " + st.proc.getInstrument (slotNo).name.toUpperCase(),
+                                          steps, std::move (codes));
+}
+
+void OffsetCalculator::popOut()
+{
+    auto chart = makeChart();
+    if (chart == nullptr) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+    const String title = chart->title;
+    auto* w = new OffsetChartWindow ("OFFSET " + title, chartWindows);
+    chartWindows.add (w);
+    w->setUsingNativeTitleBar (true);
+    w->setContentOwned (chart.release(), true);
+    w->setResizable (false, false);
+    w->setAlwaysOnTop (true);
+    if (auto* top = getTopLevelComponent())
+    {
+        const auto b = top->getScreenBounds();
+        w->setTopLeftPosition (jmax (0, b.getRight() - w->getWidth() - 40 - 30 * (chartWindows.size() - 1)), b.getY() + 120 + 30 * (chartWindows.size() - 1));
+    }
+    w->setVisible (true);
+    st.setStatus ("OFFSET CHART IN ITS OWN WINDOW - DRAG IT TO THE SIDE");
+    st.changed();
+}
+
+bool OffsetCalculator::handleKey (const KeyPress& k)
+{
+    if (! isVisible()) return false;
+    const int code = k.getKeyCode();
+    if (code == KeyPress::escapeKey) { close(); return true; }
+    if (code == KeyPress::returnKey) { writeAtCursor(); return true; }
+    if (code == KeyPress::spaceKey)  { select (selected, true); return true; }
+    const int cols = jmin (16, steps);
+    if (code == KeyPress::leftKey)  { select ((selected + steps - 1) % steps, true); return true; }
+    if (code == KeyPress::rightKey) { select ((selected + 1) % steps, true); return true; }
+    if (code == KeyPress::upKey)    { select ((selected + steps - cols) % steps, true); return true; }
+    if (code == KeyPress::downKey)  { select ((selected + cols) % steps, true); return true; }
+    return false;
+}
+
+Rectangle<int> OffsetCalculator::cellBounds (int i) const
+{
+    const int cols = jmin (16, steps), rowsN = (steps + cols - 1) / cols;
+    const int gap = 4;
+    const int cw = (gridArea.getWidth() - (cols - 1) * gap) / cols;
+    const int chh = (gridArea.getHeight() - (rowsN - 1) * gap) / rowsN;
+    return { gridArea.getX() + (i % cols) * (cw + gap), gridArea.getY() + (i / cols) * (chh + gap), cw, chh };
+}
+
+void OffsetCalculator::mouseDown (const MouseEvent& e)
+{
+    for (int i = 0; i < steps; ++i)
+        if (cellBounds (i).contains (e.getPosition())) { select (i, true); return; }
+}
+
+void OffsetCalculator::paint (Graphics& g)
+{
+    auto fit = [&] (const String& t, Rectangle<float> r, float h, Colour c, Justification j = Justification::centredLeft, bool bold = false)
+    {
+        Theme::text (g, t, r, jmin (h, h * (r.getWidth() - 2.0f) / jmax (1.0f, PixelFont::getWidth (t, h))), c, j, bold);
+    };
+    Theme::drawPanel (g, getLocalBounds().toFloat());
+    Theme::text (g, "OFFSET CALCULATOR", { 14.0f, 10.0f, 330.0f, 40.0f }, 24.0f, Theme::ink, Justification::centredLeft, true);
+    {
+        auto& b = *stepButtons[0];
+        fit ("STEPS", { (float) b.getX() - 84.0f, (float) b.getY(), 76.0f, (float) b.getHeight() }, 16.0f, Theme::ink, Justification::centredRight);
+    }
+
+    const int len = length();
+    if (len <= 0)
+    {
+        Theme::drawScreen (g, gridArea.toFloat());
+        fit ("LOAD A SAMPLE IN THIS SLOT (09 OFFSET WORKS ON SAMPLES, NOT ON THE SYNTHS)", gridArea.toFloat().reduced (10.0f, 0.0f), 17.0f,
+             Theme::screenText, Justification::centred);
+        return;
+    }
+
+    const int cols = jmin (16, steps), rowsN = (steps + cols - 1) / cols;
+    ignoreUnused (cols);
+    for (int i = 0; i < steps; ++i)
+    {
+        auto r = cellBounds (i).toFloat();
+        const int code = codeFor (i, steps, len);
+        const bool sel = i == selected, bad = code < 0;
+        Theme::drawRaised (g, r, sel ? Theme::buttonDark : (bad ? Colour (0xffb9a9a8) : Theme::buttonLight), sel);
+        const Colour ink = sel ? Theme::buttonDarkText : (bad ? kOffsetWarn : Theme::ink);
+        const String codeText = i == 0 ? "START" : (bad ? "--" : "09" + String::toHexString (code).paddedLeft ('0', 2).toUpperCase());
+        auto inner = r.reduced (3.0f, 0.0f);
+        if (r.getHeight() >= 54.0f)
+        {
+            fit (String (i + 1), inner.withHeight (r.getHeight() * 0.45f).withTrimmedBottom (2.0f), 15.0f, ink.withAlpha (0.7f), Justification::centredBottom);
+            fit (codeText, inner.withTrimmedTop (r.getHeight() * 0.45f).withTrimmedTop (3.0f).withHeight (24.0f), 19.0f, ink, Justification::centredTop, true);
+        }
+        else
+            fit (rowsN > 2 ? codeText : String (i + 1) + " " + codeText, inner, jmin (16.0f, r.getHeight() * 0.5f), ink, Justification::centred, true);
+    }
+
+    // the facts under the grid
+    const double stepFrames = (double) len / steps;
+    const auto& in = st.proc.getInstrument (st.proc.selectedInstrument);
+    const double secs = len / jmax (1.0, in.data->sampleRate);
+    const int bpm = jmax (1, st.engine().bpm.load());
+    const double stepsAtTempo = secs / (15.0 / bpm);          // 4 rows (steps) to a beat
+    const bool fits = std::abs (stepsAtTempo - steps) <= 0.25;
+    int unreachable = 0;
+    for (int i = 0; i < steps; ++i) if (codeFor (i, steps, len) < 0) ++unreachable;
+
+    const float tw = (float) playBtn.getX() - 28.0f, ty = (float) getHeight() - 76.0f;
+    fit ("1 STEP = " + String (roundToInt (stepFrames)) + " FRAMES (" + String (stepFrames / 256.0, 1) + " x 256)   16 STEPS = 1 BAR OF 4/4",
+         { 16.0f, ty, tw, 20.0f }, 15.0f, Theme::ink);
+    String tempo = "AT " + String (bpm) + " BPM THE SAMPLE IS " + String (stepsAtTempo, 1) + " STEPS";
+    if (! fits) tempo << " - BPM " << roundToInt (steps * 15.0 / secs) << " FITS " << steps << ", OR TUNE IT";
+    fit (tempo, { 16.0f, ty + 23.0f, tw, 20.0f }, 15.0f, fits ? Theme::ink.withAlpha (0.75f) : kOffsetWarn);
+    fit (unreachable > 0 ? String (unreachable) + " STEPS ARE PAST 09FF (65280 FRAMES): MAKE THE SAMPLE SHORTER"
+                         : String ("CLICK A STEP TO HEAR IT - ARROWS, SPACE PLAYS, ENTER WRITES"),
+         { 16.0f, ty + 46.0f, tw, 20.0f }, 14.0f, unreachable > 0 ? kOffsetWarn : Theme::ink.withAlpha (0.6f));
+}
+
+void OffsetCalculator::resized()
+{
+    const int w = getWidth(), h = getHeight();
+    const int sbw = 52;
+    closeBtn.setBounds (w - 124, 8, 112, 40);
+    popBtn.setBounds (closeBtn.getX() - 8 - 130, 8, 130, 40);
+    int sx = popBtn.getX() - 20 - (int) stepButtons.size() * (sbw + 4) + 4;
+    for (auto& b : stepButtons) { b->setBounds (sx, 8, sbw, 40); sx += sbw + 4; }
+    writeBtn.setBounds (w - 12 - 230, h - 58, 230, 46);
+    playBtn.setBounds (writeBtn.getX() - 8 - 150, h - 58, 150, 46);
+    gridArea = { 12, 56, w - 24, jmax (40, h - 56 - 86) };
+}
+
+// ===========================================================================
+// SampleEditPage
+// ===========================================================================
+
+SampleEditPage::SampleEditPage (EditorState& s) : st (s), list (s), resampler (s), offsets (s, wave)
+{
+    for (auto* c : std::initializer_list<Component*> { &list, &numberLabel, &name, &prev, &next, &saveBtn, &lengthVal, &rateVal, &bitsVal, &chansVal,
+                                                        &curPos, &wave, &startBox, &endBox, &loopStartBox, &loopEndBox, &setStart, &setEnd,
+                                                        &setLoop, &playLoop, &loopMode, &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize,
+                                                        &reverseBtn, &mix, &resampleBtn, &offsetBtn, &zoomIn, &zoomOut, &fit, &left, &right })
+        addAndMakeVisible (c);
+    addChildComponent (resampler);
+    addChildComponent (offsets);
+    saveBtn.setComponentID ("saveSample");
+    saveBtn.icon = Theme::iconSave;
+    saveBtn.onClick = [this]
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (in.isEmpty() || in.isSynth() || in.isSynth2())
+        {
+            st.setStatus (in.isEmpty() ? "NO SAMPLE IN THIS SLOT" : "A SYNTH CAN'T BE SAVED AS A SAMPLE");
+            st.changed();
+            return;
+        }
+        auto dir = FourTrackerProcessor::getSavedSamplesFolder();
+        dir.createDirectory();
+        auto base = File::createLegalFileName (in.name.isNotEmpty() ? in.name : "SAMPLE " + hex2 (slot()));
+        auto suggested = dir.getChildFile (base);
+        if (! suggested.hasFileExtension ("wav;aif;aiff")) suggested = suggested.withFileExtension ("wav");
+        chooser = std::make_unique<FileChooser> ("Save sample " + formatNumber (slot(), 2, st.hex()) + " (WAV or AIFF)", suggested, "*.wav;*.aif;*.aiff");
+        const int s = slot();
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+            [this, s] (const FileChooser& fc)
+            {
+                const auto f = fc.getResult();
+                if (f == File()) return;
+                const auto err = st.proc.saveInstrumentSample (s, f);
+                st.setStatus (err.isEmpty() ? "SAVED " + st.proc.getInstrument (s).name : err);
+                instrumentsChanged();
+                st.changed();
+            });
+    };
+    offsetBtn.setComponentID ("offset");
+    offsetBtn.onClick = [this] { wave.setKeysActive (false); if (offsets.isVisible()) offsets.close(); else offsets.open(); };
+    offsetBtn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        // a beat cut in 4: step lines over a wave, the 3rd one marked
+        g.setColour (c);
+        auto b = r.reduced (r.getWidth() * 0.1f, r.getHeight() * 0.1f);
+        Path w;
+        for (int i = 0; i <= 32; ++i)
+        {
+            const float x = b.getX() + b.getWidth() * i / 32.0f;
+            const float env = 1.0f - (float) (i % 8) / 8.0f;
+            const float y = b.getCentreY() - std::sin (i * 1.9f) * b.getHeight() * 0.38f * env;
+            if (i == 0) w.startNewSubPath (x, y); else w.lineTo (x, y);
+        }
+        g.strokePath (w, PathStrokeType (1.6f));
+        for (int i = 0; i < 4; ++i)
+            g.fillRect (b.getX() + b.getWidth() * i / 4.0f - (i == 2 ? 1.25f : 0.5f), r.getY(), i == 2 ? 2.5f : 1.0f, r.getHeight());
+    };
+    resampleBtn.setComponentID ("resample");
+    resampleBtn.onClick = [this] { wave.setKeysActive (false); resampler.open(); };
+    resampler.onDone = [this] { wave.clearSelection(); instrumentsChanged(); wave.zoomFit(); };
+    resampleBtn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        // a little pattern grid, an arrow, and a wave
+        g.setColour (c);
+        auto grid = r.withWidth (r.getWidth() * 0.34f).reduced (0.0f, r.getHeight() * 0.12f);
+        for (int i = 0; i < 4; ++i) g.fillRect (grid.getX(), grid.getY() + i * grid.getHeight() / 4.0f, grid.getWidth(), grid.getHeight() / 4.0f - 2.0f);
+        const float ax = grid.getRight() + 3.0f, ay = r.getCentreY();
+        Path a;
+        a.addTriangle (ax + 6.0f, ay - 5.0f, ax + 6.0f, ay + 5.0f, ax + 11.0f, ay);
+        g.fillPath (a);
+        g.fillRect (ax, ay - 1.25f, 7.0f, 2.5f);
+        Path w;
+        const float wx = ax + 13.0f, ww = r.getRight() - wx;
+        for (int i = 0; i <= 16; ++i)
+        {
+            const float px = wx + ww * i / 16.0f, py = ay - std::sin (i / 16.0f * MathConstants<float>::twoPi * 1.5f) * r.getHeight() * 0.3f;
+            if (i == 0) w.startNewSubPath (px, py); else w.lineTo (px, py);
+        }
+        g.strokePath (w, PathStrokeType (2.2f));
+    };
+
+    for (auto* l : { &lengthVal, &rateVal, &bitsVal, &chansVal }) l->setScreen (true);
+    numberLabel.setScreen (true);
+
+    prev.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (14.0f, 22.0f), c, false); };
+    next.icon = [] (Graphics& g, Rectangle<float> r, Colour c) { Theme::iconArrow (g, r.withSizeKeepingCentre (14.0f, 22.0f), c, true); };
+    left.icon = prev.icon; right.icon = next.icon;
+    prev.onClick = [this] { st.proc.selectedInstrument = jmax (1, slot() - 1); st.changed(); };
+    next.onClick = [this] { st.proc.selectedInstrument = jmin (kNumInstruments - 1, slot() + 1); st.changed(); };
+    name.onChange = [this] (const String& t) { st.proc.getInstrument (slot()).name = t; st.proc.instrumentChanged (slot()); st.changed(); };
+    list.onSelectionChanged = [this] { wave.clearSelection(); instrumentsChanged(); };
+
+    auto five = [] (int v) { return String (v).paddedLeft ('0', 5); };
+    for (auto* v : { &curPos, &startBox, &endBox, &loopStartBox, &loopEndBox })
+    {
+        v->formatter = five;
+        v->setShowSpinner (true);
+        v->setDragSensitivity (0.5f);
+        v->setLargeStep (1000);
+    }
+
+    curPos.onChange = [this] (int v) { wave.setCursor (v); };
+    wave.onCursorChanged = [this] { curPos.setValue (wave.getCursor()); };
+    wave.onActivated = [this]
+    {
+        if (! wave.areKeysActive()) { st.setStatus ("WAVEFORM: CTRL+A SELECT ALL, CTRL+C / X / V, DEL"); st.changed(); }
+        wave.setKeysActive (true);
+    };
+    wave.onPointsChanged = [this] (const InstrumentParams& p) { pushPoints (p); };
+
+    auto pointsFromBoxes = [this]
+    {
+        auto p = st.proc.getInstrument (slot()).params;
+        p.start = startBox.getValue();
+        p.end = endBox.getValue();
+        p.loopStart = loopStartBox.getValue();
+        p.loopEnd = loopEndBox.getValue();
+        pushPoints (p);
+    };
+    for (auto* v : { &startBox, &endBox, &loopStartBox, &loopEndBox }) v->onChange = [pointsFromBoxes] (int) { pointsFromBoxes(); };
+
+    setStart.onClick = [this] { auto p = st.proc.getInstrument (slot()).params; p.start = wave.getCursor(); if (p.end < p.start) p.end = p.start; pushPoints (p); };
+    setEnd.onClick   = [this] { auto p = st.proc.getInstrument (slot()).params; p.end = wave.getCursor(); if (p.start > p.end) p.start = p.end; pushPoints (p); };
+    setLoop.onClick  = [this]
+    {
+        auto p = st.proc.getInstrument (slot()).params;
+        if (wave.hasSelection()) { p.loopStart = wave.getSelectionStart(); p.loopEnd = wave.getSelectionEnd(); }
+        else                     { p.loopStart = wave.getCursor(); p.loopEnd = p.end; }
+        p.loop = true;
+        pushPoints (p);
+        st.setStatus ("LOOP SET");
+    };
+    playLoop.onClick = [this]
+    {
+        if (loopPreviewing) { st.engine().requestStopPreview(); loopPreviewing = false; }
+        else
+        {
+            auto& in = st.proc.getInstrument (slot());
+            if (! in.params.loop) { st.setStatus ("LOOP IS OFF - USE SET LOOP FIRST"); st.changed(); return; }
+            st.engine().requestPreview (slot(), kNativeNote, true);
+            loopPreviewing = true;
+        }
+        playLoop.setButtonText (loopPreviewing ? "STOP LOOP" : "PLAY LOOP");
+    };
+    loopMode.onChange = [this] (bool forward)
+    {
+        auto p = st.proc.getInstrument (slot()).params;
+        p.loopBackward = ! forward;
+        p.pingPong = false;
+        pushPoints (p);
+    };
+
+    auto range = [this] (int& from, int& to)
+    {
+        if (wave.hasSelection()) { from = wave.getSelectionStart(); to = wave.getSelectionEnd(); return true; }
+        auto& in = st.proc.getInstrument (slot());
+        from = 0; to = in.isEmpty() ? 0 : in.data->getLength() - 1;
+        return false;
+    };
+    ignoreUnused (range);
+
+    cut.onClick       = [this] { edit ([this] (Instrument& in, int a, int b) { return in.cut (a, b, clip); }, true, "CUT"); wave.clearSelection(); };
+    copy.onClick      = [this]
+    {
+        if (! wave.hasSelection()) { st.setStatus ("SELECT PART OF THE SAMPLE FIRST"); st.changed(); return; }
+        st.proc.getInstrument (slot()).copy (wave.getSelectionStart(), wave.getSelectionEnd(), clip);
+        st.setStatus ("COPIED " + String (clip.getNumSamples()) + " FRAMES");
+        st.changed();
+    };
+    paste.onClick     = [this]
+    {
+        if (clip.getNumSamples() == 0) { st.setStatus ("SAMPLE CLIPBOARD IS EMPTY"); st.changed(); return; }
+        auto& in = st.proc.getInstrument (slot());
+        if (in.paste (wave.getCursor(), clip))
+        {
+            st.proc.instrumentChanged (slot());
+            wave.setSelection (wave.getCursor(), wave.getCursor() + clip.getNumSamples() - 1);
+            st.setStatus ("PASTED");
+            st.changed();
+        }
+    };
+    fadeIn.onClick    = [this] { edit ([] (Instrument& in, int a, int b) { return in.fadeIn (a, b); }, false, "FADE IN"); };
+    fadeOut.onClick   = [this] { edit ([] (Instrument& in, int a, int b) { return in.fadeOut (a, b); }, false, "FADE OUT"); };
+    normalize.onClick = [this] { edit ([] (Instrument& in, int a, int b) { return in.normalise (a, b); }, false, "NORMALIZE"); };
+    reverseBtn.onClick= [this] { edit ([] (Instrument& in, int a, int b) { return in.reverseRange (a, b); }, false, "REVERSE"); };
+
+    // MIX (like OctaMED): pick another slot, its sample is mixed in from the cursor (or the selection start)
+    mix.onClick = [this]
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (in.isEmpty()) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+        PopupMenu m;
+        m.addSectionHeader ("MIX INTO " + hex2 (slot()) + " FROM:");
+        for (int i = 1; i < kNumInstruments; ++i)
+        {
+            const auto& o = st.proc.getInstrument (i);
+            if (i != slot() && ! o.isEmpty())
+                m.addItem (i, formatNumber (i, 2, st.hex()) + "  " + o.name);
+        }
+        if (m.getNumItems() <= 1) { st.setStatus ("LOAD ANOTHER SAMPLE TO MIX IN"); st.changed(); return; }
+        Component::SafePointer<SampleEditPage> safe (this);
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&mix), [safe] (int chosen)
+        {
+            if (safe == nullptr || chosen <= 0) return;
+            auto& self = *safe;
+            auto& dst = self.st.proc.getInstrument (self.slot());
+            const int at = self.wave.hasSelection() ? self.wave.getSelectionStart() : self.wave.getCursor();
+            if (dst.mixIn (self.st.proc.getInstrument (chosen), at))
+            {
+                self.st.proc.instrumentChanged (self.slot());
+                self.st.setStatus ("MIXED " + hex2 (chosen) + " " + self.st.proc.getInstrument (chosen).name.toUpperCase()
+                                   + " IN AT " + String (at));
+            }
+            self.st.changed();
+        });
+    };
+    mix.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        r = r.reduced (r.getWidth() * 0.18f, r.getHeight() * 0.25f);
+        for (int w = 0; w < 2; ++w)
+        {
+            Path p;
+            for (int i = 0; i <= 32; ++i)
+            {
+                const float x = r.getX() + r.getWidth() * i / 32.0f;
+                const float y = r.getCentreY() - std::sin (i / 32.0f * MathConstants<float>::twoPi * (w == 0 ? 1.0f : 2.0f))
+                                                 * r.getHeight() * (w == 0 ? 0.45f : 0.25f);
+                if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            }
+            g.setColour (c);
+            g.strokePath (p, PathStrokeType (2.2f));
+        }
+    };
+
+    cut.icon = Theme::iconScissors;
+    copy.icon = Theme::iconClip;
+    paste.icon = Theme::iconClip;
+    fadeIn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        g.setColour (c);
+        for (int i = 0; i < 9; ++i) { const float h = r.getHeight() * (i + 1) / 9.0f; g.fillRect (r.getX() + i * r.getWidth() / 9.0f, r.getBottom() - h, r.getWidth() / 9.0f - 1.5f, h); }
+    };
+    fadeOut.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        g.setColour (c);
+        for (int i = 0; i < 9; ++i) { const float h = r.getHeight() * (9 - i) / 9.0f; g.fillRect (r.getX() + i * r.getWidth() / 9.0f, r.getBottom() - h, r.getWidth() / 9.0f - 1.5f, h); }
+    };
+    normalize.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        g.setColour (c);
+        const float hs[] = { 0.35f, 0.55f, 0.8f, 1.0f };
+        for (int i = 0; i < 4; ++i) { const float h = r.getHeight() * hs[i]; g.fillRect (r.getX() + r.getWidth() * (0.15f + i * 0.18f), r.getBottom() - h, r.getWidth() * 0.13f, h); }
+    };
+    reverseBtn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        Path p;
+        auto t = r.withSizeKeepingCentre (r.getHeight() * 0.9f, r.getHeight() * 0.75f);
+        p.addTriangle (t.getX(), t.getBottom(), t.getRight(), t.getBottom(), t.getCentreX(), t.getY());
+        g.setColour (c);
+        g.fillPath (p);
+    };
+    zoomIn.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        auto b = r.withSizeKeepingCentre (26.0f, 26.0f);
+        g.setColour (c);
+        g.drawEllipse (b.withSize (20.0f, 20.0f), 2.5f);
+        g.drawLine (b.getX() + 17.0f, b.getY() + 17.0f, b.getRight(), b.getBottom(), 3.0f);
+        g.fillRect (b.getX() + 5.0f, b.getY() + 9.0f, 10.0f, 2.5f);
+        g.fillRect (b.getX() + 8.75f, b.getY() + 5.0f, 2.5f, 10.0f);
+    };
+    zoomOut.icon = [] (Graphics& g, Rectangle<float> r, Colour c)
+    {
+        auto b = r.withSizeKeepingCentre (26.0f, 26.0f);
+        g.setColour (c);
+        g.drawEllipse (b.withSize (20.0f, 20.0f), 2.5f);
+        g.drawLine (b.getX() + 17.0f, b.getY() + 17.0f, b.getRight(), b.getBottom(), 3.0f);
+        g.fillRect (b.getX() + 5.0f, b.getY() + 9.0f, 10.0f, 2.5f);
+    };
+
+    zoomIn.onClick  = [this] { wave.zoomIn(); };
+    zoomOut.onClick = [this] { wave.zoomOut(); };
+    fit.onClick     = [this] { wave.zoomFit(); };
+    left.onClick    = [this] { wave.scroll (-1); };
+    right.onClick   = [this] { wave.scroll (1); };
+
+    captions = { { &cut, "CUT" }, { &copy, "COPY" }, { &paste, "PASTE" }, { &fadeIn, "FADE IN" }, { &fadeOut, "FADE OUT" },
+                 { &normalize, "NORMALIZE" }, { &reverseBtn, "REVERSE" }, { &mix, "MIX" }, { &resampleBtn, "RE-SAMPLE" }, { &offsetBtn, "OFFSET" } };
+    for (auto& [b, t] : captions) b->setButtonText ({});
+
+    instrumentsChanged();
+}
+
+void SampleEditPage::mouseDown (const MouseEvent&)
+{
+    wave.setKeysActive (false);     // clicked outside the waveform
+}
+
+void SampleEditPage::visibilityChanged()
+{
+    if (! isVisible()) { wave.setKeysActive (false); offsets.close(); }
+}
+
+bool SampleEditPage::handleKey (const KeyPress& k)
+{
+    if (resampler.isVisible()) return resampler.handleKey (k);
+    if (offsets.isVisible() && offsets.handleKey (k)) return true;
+    if (! wave.areKeysActive()) return false;
+    const auto m = k.getModifiers();
+    const int code = k.getKeyCode();
+    const bool ctrl = m.isCommandDown() && ! m.isAltDown();
+    auto is = [&] (char ch) { return ctrl && (code == ch || code == ch + 32); };
+
+    if (is ('A'))
+    {
+        auto& in = st.proc.getInstrument (slot());
+        if (in.isEmpty()) return true;
+        wave.setSelection (0, in.data->getLength() - 1);
+        st.setStatus ("WHOLE SAMPLE SELECTED");
+        st.changed();
+        return true;
+    }
+    // run the buttons' actions right away (triggerClick would run them later)
+    if (is ('C')) { if (copy.onClick)  copy.onClick();  return true; }
+    if (is ('X')) { if (cut.onClick)   cut.onClick();   return true; }
+    if (is ('V')) { if (paste.onClick) paste.onClick(); return true; }
+    if (code == KeyPress::deleteKey && ! m.isAnyModifierKeyDown() && wave.hasSelection())
+    {
+        // Delete removes the selection without touching the clipboard
+        edit ([] (Instrument& in, int a, int b) { AudioBuffer<float> scratch; return in.cut (a, b, scratch); }, true, "DELETED");
+        wave.clearSelection();
+        return true;
+    }
+    if (code == KeyPress::escapeKey && wave.hasSelection()) { wave.clearSelection(); return true; }
+    return false;
+}
+
+void SampleEditPage::edit (std::function<bool (Instrument&, int, int)> op, bool needsSelection, const String& what)
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (in.isEmpty()) { st.setStatus ("NO SAMPLE IN THIS SLOT"); st.changed(); return; }
+    int a = 0, b = in.data->getLength() - 1;
+    if (wave.hasSelection()) { a = wave.getSelectionStart(); b = wave.getSelectionEnd(); }
+    else if (needsSelection) { st.setStatus ("SELECT PART OF THE SAMPLE FIRST"); st.changed(); return; }
+
+    if (op (in, a, b))
+    {
+        st.proc.instrumentChanged (slot());
+        st.setStatus (what + (wave.hasSelection() ? " (SELECTION)" : " (WHOLE SAMPLE)"));
+    }
+    st.changed();
+}
+
+void SampleEditPage::pushPoints (const InstrumentParams& p)
+{
+    auto& in = st.proc.getInstrument (slot());
+    if (in.isEmpty()) return;
+    in.params = p;
+    st.proc.instrumentChanged (slot());
+    instrumentsChanged();
+}
+
+void SampleEditPage::instrumentsChanged()
+{
+    auto& in = st.proc.getInstrument (slot());
+    numberLabel.setText (formatNumber (slot(), 2, st.hex()));
+    name.setText (in.name);
+
+    const bool empty = in.isEmpty();
+    const int len = empty ? 0 : in.data->getLength();
+    lengthVal.setText (empty ? "-" : String (len));
+    rateVal.setText (empty ? "-" : String ((int) in.data->sampleRate));
+    bitsVal.setText (empty ? "-" : String (in.data->bitDepth));
+    chansVal.setText (empty ? "-" : (in.data->getNumChannels() == 1 ? String ("1 (MONO)") : String ("2 (STEREO)")));
+
+    const int last = jmax (0, len - 1);
+    curPos.setRange (0, last);
+    for (auto* v : { &startBox, &endBox, &loopStartBox, &loopEndBox }) v->setRange (0, last);
+    startBox.setValue (in.params.start);
+    endBox.setValue (in.params.end);
+    loopStartBox.setValue (in.params.loopStart);
+    loopEndBox.setValue (in.params.loopEnd);
+    loopMode.setState (! in.params.loopBackward);
+
+    wave.setSample (in.data, &in.params);
+    curPos.setValue (wave.getCursor());
+    if (offsets.isVisible()) offsets.sampleChanged();
+    repaint();
+}
+
+void SampleEditPage::refresh()
+{
+    const int pp = st.engine().previewPosition.load();
+    wave.setPlayhead (pp);
+    if (loopPreviewing && pp < 0)
+    {
+        loopPreviewing = false;
+        playLoop.setButtonText ("PLAY LOOP");
+    }
+}
+
+void SampleEditPage::paint (Graphics& g)
+{
+    Theme::drawPanel (g, header.toFloat());
+    Theme::text (g, "SAMPLE EDIT", header.toFloat().withTrimmedLeft (8.0f), 28.0f, Theme::ink, Justification::centredLeft, true);
+
+    Theme::drawPanel (g, infoRow.toFloat());
+    const char* titles[] = { "LENGTH", "SAMPLE RATE", "BIT DEPTH", "CHANNELS", "CURRENT POS" };
+    Component* fields[] = { &lengthVal, &rateVal, &bitsVal, &chansVal, &curPos };
+    for (int i = 0; i < 5; ++i)
+    {
+        auto b = fields[i]->getBounds();
+        Theme::text (g, titles[i], { (float) b.getX(), (float) infoRow.getY() + 10.0f, 260.0f, 20.0f }, 19.0f, Theme::ink, Justification::topLeft);
+        if (i > 0) { g.setColour (Theme::panelEdgeLo); g.fillRect ((float) b.getX() - 10.0f, (float) infoRow.getY() + 4.0f, 2.0f, (float) infoRow.getHeight() - 8.0f); }
+    }
+
+    Theme::drawPanel (g, pointsRow.toFloat());
+    labelLeft (g, "START",      { startBox.getX() - 84, startBox.getY(), 80, startBox.getHeight() }, 16.0f);
+    labelLeft (g, "END",        { endBox.getX() - 56, endBox.getY(), 56, endBox.getHeight() }, 16.0f);
+    labelLeft (g, "LOOP START", { loopStartBox.getX() - 146, loopStartBox.getY(), 146, loopStartBox.getHeight() }, 16.0f);
+    labelLeft (g, "LOOP END",   { loopEndBox.getX() - 114, loopEndBox.getY(), 114, loopEndBox.getHeight() }, 16.0f);
+
+    Theme::drawPanel (g, buttonsRow.toFloat());
+    labelLeft (g, "LOOP MODE", { loopMode.getX() - 136, loopMode.getY(), 132, loopMode.getHeight() }, 16.0f);
+
+    Theme::drawPanel (g, editPanel.toFloat());
+    Theme::text (g, "EDIT", editPanel.toFloat().translated (12.0f, 10.0f).withHeight (22.0f), 21.0f, Theme::ink, Justification::topLeft);
+    for (auto& [b, t] : captions)   // shrink long captions so they stay under their own button
+        captionUnder (g, *b, t, jmin (13.0f, 13.0f * (float) (b->getWidth() - 4) / jmax (1.0f, PixelFont::getWidth (t, 13.0f))));
+
+    Theme::drawPanel (g, zoomPanel.toFloat());
+    Theme::text (g, "ZOOM", zoomPanel.toFloat().translated (12.0f, 10.0f).withHeight (22.0f), 21.0f, Theme::ink, Justification::topLeft);
+    Theme::text (g, "SCROLL", Rectangle<float> ((float) left.getX(), (float) left.getBottom() + 8.0f, (float) (right.getRight() - left.getX()), 18.0f),
+                 16.0f, Theme::ink, Justification::centredTop);
+}
+
+void SampleEditPage::resized()
+{
+    list.setBounds (0, 0, 390, getHeight());
+    const int x0 = 396, w = getWidth() - x0;
+
+    header = { x0, 0, w, 62 };
+    numberLabel.setBounds (x0 + 290, 7, 70, 48);
+    name.setBounds (x0 + 372, 7, w - 372 - 170 - 148, 48);
+    saveBtn.setBounds (header.getRight() - 162 - 148, 7, 140, 48);
+    prev.setBounds (header.getRight() - 162, 7, 74, 48);
+    next.setBounds (header.getRight() - 82, 7, 74, 48);
+
+    infoRow = { x0, 68, w, 96 };
+    const int fw = (w - 20) / 5;
+    Component* fields[] = { &lengthVal, &rateVal, &bitsVal, &chansVal, &curPos };
+    for (int i = 0; i < 5; ++i) fields[i]->setBounds (x0 + 12 + i * fw, 104, fw - 22, 48);
+
+    wave.setBounds (x0, 172, w, 236);
+
+    pointsRow = { x0, 412, w, 66 };
+    const int pw = w / 4;
+    startBox.setBounds (x0 + 90, 421, pw - 104, 48);
+    endBox.setBounds (x0 + pw + 62, 421, pw - 76, 48);
+    loopStartBox.setBounds (x0 + 2 * pw + 146, 421, pw - 160, 48);
+    loopEndBox.setBounds (x0 + 3 * pw + 114, 421, pw - 124, 48);
+
+    buttonsRow = { x0, 482, w, 64 };
+    setStart.setBounds (x0 + 8, 490, 142, 48);
+    setEnd.setBounds (x0 + 158, 490, 126, 48);
+    setLoop.setBounds (x0 + 292, 490, 134, 48);
+    playLoop.setBounds (x0 + 434, 490, 152, 48);
+    loopMode.setBounds (x0 + w - 324, 490, 316, 48);
+
+    editPanel = { x0, 552, 760, getHeight() - 552 };
+    zoomPanel = { x0 + 768, 552, w - 768, getHeight() - 552 };
+
+    const int bw = 68, bh = 80;
+    PixelButton* eb[] = { &cut, &copy, &paste, &fadeIn, &fadeOut, &normalize, &reverseBtn, &mix, &resampleBtn, &offsetBtn };
+    for (int i = 0; i < 10; ++i)
+        eb[i]->setBounds (editPanel.getX() + 12 + i * (bw + 6), editPanel.getY() + 38, bw, bh);
+
+    const int zx = zoomPanel.getX() + 12, zy = zoomPanel.getY() + 38;
+    zoomIn.setBounds (zx, zy, 60, 80);
+    zoomOut.setBounds (zx + 66, zy, 60, 80);
+    fit.setBounds (zx + 132, zy, 60, 80);
+    left.setBounds (zx + 198, zy, 60, 66);
+    right.setBounds (zx + 264, zy, 60, 66);
+
+    resampler.setBounds (getLocalBounds().withTrimmedLeft (x0));
+    offsets.setBounds (x0, 412, w, getHeight() - 412);   // under the waveform, which stays in view
+}

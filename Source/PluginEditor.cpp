@@ -1,565 +1,606 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Breakbeat Processor - Copyright (C) 2026 elcrispo76
+// Four Tracker - Copyright (C) 2026 elcrispo76
 
 #include "PluginEditor.h"
-#include "PixelFont.h"     // the Amiga-style pixel font from Four Tracker
 
 using namespace juce;
+using namespace ft;
 
-// ---------------------------------------------------------------------------
-// look (the same grey panels, black screens and white keys as Four Tracker)
-// ---------------------------------------------------------------------------
-namespace Look
+FourTrackerEditor::FourTrackerEditor (FourTrackerProcessor& p)
+    : AudioProcessorEditor (&p), proc (p), state (p),
+      title (state), header (state), patternView (state), strips (state), songPanel (state),
+      blockPanel (state, patternView), instrumentsPage (state), sampleEditPage (state), settingsPage (state), sampleBrowser (state), recBar (p)
 {
-    const Colour background  { 0xffb3b7c0 };
-    const Colour panel       { 0xffc4c7cf };
-    const Colour edgeHi      { 0xffe4e6eb };
-    const Colour edgeLo      { 0xff878b94 };
-    const Colour ink         { 0xff0c0d0f };
-    const Colour screen      { 0xff040405 };
-    const Colour screenText  { 0xffeceef2 };
-    const Colour screenDim   { 0xff8c9098 };
-    const Colour key         { 0xfff7f8fa };
-    const Colour red         { 0xffd9342b };
-    const Colour redDark     { 0xff5a1a17 };
+    addAndMakeVisible (root);
+    for (auto* c : std::initializer_list<Component*> { &title, &header, &patternView, &strips, &songPanel, &blockPanel,
+                                                        &instrumentsPage, &sampleEditPage, &settingsPage,
+                                                        &tabInstruments, &tabSample, &tabSong, &tabBlock, &tabSettings, &tabTracks })
+        root.addChildComponent (c);
 
-    void text (Graphics& g, const String& t, Rectangle<float> r, float h, Colour c,
-               Justification j = Justification::centredLeft, bool bold = false)
-    {
-        g.setColour (c);
-        PixelFont::draw (g, t, r, h, j, bold);
-    }
+    title.setVisible (true);
+    header.setVisible (true);
+    for (auto* t : { &tabInstruments, &tabSample, &tabSong, &tabBlock, &tabSettings, &tabTracks }) t->setVisible (true);
 
-    void panelBox (Graphics& g, Rectangle<float> r)
-    {
-        g.setColour (panel);
-        g.fillRect (r);
-        g.setColour (edgeHi);
-        g.fillRect (r.removeFromTop (2.0f));
-        g.fillRect (r.removeFromLeft (2.0f));
-        g.setColour (edgeLo);
-        g.fillRect (r.removeFromBottom (2.0f));
-        g.fillRect (r.removeFromRight (2.0f));
-    }
+    tabInstruments.icon = Theme::iconWave;  tabInstruments.iconWidth = 84.0f;
+    tabSample.icon = Theme::iconWave;       tabSample.iconWidth = 84.0f;
+    tabSong.icon = Theme::iconList;         tabSong.iconWidth = 70.0f;
+    tabBlock.icon = Theme::iconGrid;        tabBlock.iconWidth = 66.0f;
+    tabSettings.icon = Theme::iconMidi;     tabSettings.iconWidth = 66.0f;
+    tabTracks.icon = Theme::iconTracks;
+    tabTracks.setButtonText ({});
 
-    void screenBox (Graphics& g, Rectangle<float> r)
-    {
-        g.setColour (edgeLo);
-        g.fillRect (r.expanded (2.0f));
-        g.setColour (screen);
-        g.fillRect (r);
-    }
+    tabInstruments.onClick = [this] { showPage (Page::Instruments); };
+    tabSample.onClick      = [this] { showPage (Page::SampleEdit); };
+    tabSong.onClick        = [this] { showPage (Page::Song); };
+    tabBlock.onClick       = [this] { showPage (Page::Block); };
+    tabSettings.onClick    = [this] { showPage (Page::Settings); };
+    tabTracks.onClick      = [this] { showPage (Page::Tracks); };
+    title.onGridClicked    = [this] { showPage (Page::Tracks); };
+    header.onInstrumentSelected = [this] { instrumentsPage.instrumentsChanged(); sampleEditPage.instrumentsChanged(); };
 
-    /** A rounded white key with a thick black rim, like the sketch. */
-    void key3d (Graphics& g, Rectangle<float> r, Colour fill, bool down)
-    {
-        const float rad = jmin (10.0f, r.getHeight() * 0.18f);
-        if (! down) { g.setColour (Colours::black.withAlpha (0.25f)); g.fillRoundedRectangle (r.translated (2.0f, 3.0f), rad); }
-        else r = r.translated (1.0f, 2.0f);
-        g.setColour (fill);
-        g.fillRoundedRectangle (r, rad);
-        g.setColour (ink);
-        g.drawRoundedRectangle (r.reduced (1.5f), rad, 3.0f);
-    }
+    state.onAnythingChanged = [this] { refreshAll(); };
 
-    void iconRev (Graphics& g, Rectangle<float> r, Colour c)
+    root.addChildComponent (sampleBrowser);
+    root.addAndMakeVisible (trackCount);
+    root.addAndMakeVisible (masterVolume);
+    root.addAndMakeVisible (mixButton);
+    mixButton.setComponentID ("mixButton");
+    mixButton.setWantsKeyboardFocus (false);
+    mixButton.setMouseClickGrabsKeyboardFocus (false);
+    mixButton.onClick = [this] { toggleMixer(); };
+    // REC only in the program itself: in a DAW, the DAW records
+    if (proc.wrapperType == AudioProcessor::wrapperType_Standalone) root.addAndMakeVisible (recBar);
+    recBar.onStatus = [this] (const String& s) { state.setStatus (s); title.refresh(); state.changed(); };
+    masterVolume.getValue = [this] { return state.engine().masterVolume.load(); };
+    masterVolume.setValue = [this] (int v) { state.engine().masterVolume = v; };
+    masterVolume.getFade  = [this] { return state.engine().fadeLevel.load(); };
+    masterVolume.getFadeState = [this] { return state.engine().getFadeState(); };
+    root.addChildComponent (trackNav);
+    trackNav.onPage = [this] (int pageIndex)
     {
-        const float w = r.getWidth(), h = r.getHeight();
-        Path p;
-        p.startNewSubPath (r.getX(), r.getCentreY());
-        p.lineTo (r.getX() + w * 0.45f, r.getY());
-        p.lineTo (r.getX() + w * 0.45f, r.getY() + h * 0.28f);
-        p.lineTo (r.getRight(), r.getY() + h * 0.28f);
-        p.lineTo (r.getRight(), r.getBottom() - h * 0.28f);
-        p.lineTo (r.getX() + w * 0.45f, r.getBottom() - h * 0.28f);
-        p.lineTo (r.getX() + w * 0.45f, r.getBottom());
-        p.closeSubPath();
-        g.setColour (c);
-        g.fillPath (p);
-    }
+        const int n = state.numChannels();
+        const int pages = (n + kVisibleChannels - 1) / kVisibleChannels;
+        pageIndex = jlimit (0, pages - 1, pageIndex);
+        const int col = state.cursorCh % kVisibleChannels;
+        state.cursorCh = jmin (n - 1, pageIndex * kVisibleChannels + col);   // same column in the other group
+        state.hasSelection = false;
+        grabKeyboardFocus();
+        refreshAll();
+    };
+    trackCount.onPlus  = [this] { addTrack(); };
+    trackCount.onMinus = [this] { removeTrack(); };
+    state.openSampleBrowser = [this] { sampleBrowser.open(); };
+    sampleBrowser.onClosed  = [this] { grabKeyboardFocus(); refreshAll(); };
 
-    void iconStop (Graphics& g, Rectangle<float> r, Colour c)
+   #if FOURTRACKER_FX_HOST
+    if (auto* host = proc.getFxHost())
     {
-        g.setColour (c);
-        g.fillRect (r);
+        fxPage = std::make_unique<FxPage> (state, *host);
+        root.addChildComponent (*fxPage);
+        fxBar = std::make_unique<FxBar> (*host);
+        root.addChildComponent (*fxBar);
+        fxBar->onDone = [this] { grabKeyboardFocus(); };
+        routeBar = std::make_unique<RouteBar> (*host);
+        root.addChildComponent (*routeBar);
+        routeBar->onDone = [this] { grabKeyboardFocus(); };
+        routeBar->columnBounds = [] (int v) { return Rectangle<int> (4 + v * 380, 0, 360, 42); };   // under the pattern columns
+        fxPage->onClosed = [this] { fxButton.setToggleState (false, dontSendNotification); grabKeyboardFocus(); };
+        root.addAndMakeVisible (fxButton);
+        fxButton.onClick = [this] { toggleFxPage(); };
     }
+   #endif
+    proc.addChangeListener (this);
 
-    /** What a step or a tool shows for an action. */
-    void drawAction (Graphics& g, int action, Rectangle<float> r, float textH, Colour c)
-    {
-        if (action == bb::Rev)
-        {
-            const float s = jmin (r.getWidth() * 0.55f, r.getHeight() * 0.5f);
-            iconRev (g, Rectangle<float> (s, s * 0.8f).withCentre (r.getCentre()), c);
-        }
-        else if (action == bb::Stop)
-        {
-            const float s = jmin (r.getWidth(), r.getHeight()) * 0.42f;
-            iconStop (g, Rectangle<float> (s, s).withCentre (r.getCentre()), c);
-        }
-        else if (action != bb::Thru)
-        {
-            text (g, bb::actionName (action), r, textH, c, Justification::centred, true);
-        }
-    }
+    showPage (Page::Tracks);
+
+    setWantsKeyboardFocus (true);
+    setResizable (true, true);
+    setResizeLimits (768, 512, 2304, 1536);
+    if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) kDesignW / kDesignH);
+    setSize (1152, 768);
+
+    startTimerHz (30);
+
+    // first run: put the demo song and demo samples in Documents/Four Tracker/Demo
+    MessageManager::callAsync ([] { FourTrackerProcessor::ensureDemoFolder(); });
 }
 
-// ---------------------------------------------------------------------------
-// a step pad: LED on top, the key, the number under
-// ---------------------------------------------------------------------------
-struct BreakbeatEditor::StepPad : public Component, public SettableTooltipClient
+FourTrackerEditor::~FourTrackerEditor()
 {
-    StepPad (BreakbeatEditor& e, int i) : ed (e), index (i)
-    {
-        setTooltip ("Step " + String (i + 1) + ". Click with a tool to set it, or right-click for the menu.");
-    }
+    proc.removeChangeListener (this);
+    stopTimer();
+    mixerWindow.reset();
+}
 
-    void paint (Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat();
-        const bool lit = ed.getPlayingStep() == index;
-        const int action = ed.getStepAction (index);
-
-        // LED
-        auto led = r.removeFromTop (14.0f).withSizeKeepingCentre (r.getWidth() * 0.5f, 8.0f);
-        g.setColour (Look::edgeLo);
-        g.fillRect (led.expanded (1.5f));
-        g.setColour (lit ? Look::red : Look::redDark);
-        g.fillRect (led);
-        if (lit) { g.setColour (Look::red.withAlpha (0.35f)); g.fillRect (led.expanded (4.0f, 3.0f)); }
-        r.removeFromTop (8.0f);
-
-        // number, and the pattern row the step starts on
-        auto num = r.removeFromBottom (46.0f);
-        Look::text (g, String (index + 1), num.withTrimmedTop (6.0f).removeFromTop (24.0f), 22.0f, Look::ink, Justification::centredTop, true);
-        Look::text (g, "ROW " + String (index * ed.getRowsPerStep()).paddedLeft ('0', 2), num.removeFromBottom (12.0f), 9.0f,
-                    Look::edgeLo.darker (0.5f), Justification::centredTop);
-
-        // the key
-        auto k = r.reduced (2.0f, 0.0f).withTrimmedBottom (4.0f);
-        const Colour fill = lit ? Colour (0xffffe7e3) : (hover && ed.getBrush() >= 0 ? Colour (0xffeef2ff) : Look::key);
-        Look::key3d (g, k, fill, down);
-        if (down) k = k.translated (1.0f, 2.0f);
-        Look::drawAction (g, action, k.reduced (8.0f), 22.0f, action == bb::Bit ? Look::red : Look::ink);
-        if (action == bb::Thru)
-            Look::text (g, "-", k, 14.0f, Look::edgeLo, Justification::centred);
-    }
-
-    void mouseEnter (const MouseEvent&) override { hover = true; repaint(); }
-    void mouseExit  (const MouseEvent&) override { hover = false; repaint(); }
-    void mouseDown (const MouseEvent& e) override
-    {
-        if (e.mods.isPopupMenu()) { ed.showStepMenu (index); return; }
-        down = true; repaint();
-        ed.stepPressed (index, e);
-    }
-    void mouseDrag (const MouseEvent& e) override { ed.stepDragged (e); }
-    void mouseUp (const MouseEvent&) override { down = false; repaint(); }
-
-    BreakbeatEditor& ed;
-    const int index;
-    bool hover = false, down = false;
-};
-
-// ---------------------------------------------------------------------------
-// palette button
-// ---------------------------------------------------------------------------
-struct BreakbeatEditor::ToolButton : public Component, public SettableTooltipClient
-{
-    ToolButton (int a, String t = {}) : action (a), label (std::move (t)) {}
-
-    void paint (Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat().reduced (2.0f, 2.0f).withTrimmedBottom (2.0f).withTrimmedRight (2.0f);
-        Look::key3d (g, r, selected ? Look::ink : Look::key, down || selected);
-        if (down || selected) r = r.translated (1.0f, 2.0f);
-        const Colour c = selected ? Look::screenText : Look::ink;
-        if (label.isNotEmpty()) Look::text (g, label, r, 13.0f, c, Justification::centred, true);
-        else Look::drawAction (g, action, r.reduced (8.0f, 6.0f), 15.0f, c);
-    }
-
-    void mouseDown (const MouseEvent&) override { down = true; repaint(); }
-    void mouseUp (const MouseEvent& e) override
-    {
-        down = false; repaint();
-        if (getLocalBounds().contains (e.getPosition()) && onClick) onClick();
-    }
-
-    void setSelected (bool s) { if (s != selected) { selected = s; repaint(); } }
-
-    const int action;
-    String label;
-    bool selected = false, down = false;
-    std::function<void()> onClick;
-};
-
-// ---------------------------------------------------------------------------
-// knob, round disc with a line, value in a small screen (Four Tracker style)
-// ---------------------------------------------------------------------------
-struct BreakbeatEditor::Knob : public Component, public SettableTooltipClient
-{
-    Knob (RangedAudioParameter& p, String name, std::function<String (int)> fmt)
-        : param (p), label (std::move (name)), format (std::move (fmt)),
-          attach (p, [this] (float) { repaint(); }, nullptr)
-    {
-        attach.sendInitialUpdate();
-    }
-
-    int value() const { return roundToInt (param.convertFrom0to1 (param.getValue())); }
-    int minV() const  { return roundToInt (param.getNormalisableRange().start); }
-    int maxV() const  { return roundToInt (param.getNormalisableRange().end); }
-
-    void set (int v)
-    {
-        v = jlimit (minV(), maxV(), v);
-        if (v != value()) attach.setValueAsPartOfGesture ((float) v);
-    }
-
-    void paint (Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat();
-        Look::text (g, label, r.removeFromTop (16.0f), 12.0f, Look::ink, Justification::centredTop, true);
-        auto vr = r.removeFromBottom (20.0f).reduced (6.0f, 0.0f);
-        Look::screenBox (g, vr);
-        const String txt = format (value());
-        float th = 11.0f;
-        while (th > 7.0f && PixelFont::getWidth (txt, th) > vr.getWidth() - 6.0f) th -= 0.5f;   // shrink to fit
-        Look::text (g, txt, vr, th, Look::screenText, Justification::centred);
-
-        const float d = jmin (r.getWidth() - 14.0f, r.getHeight() - 8.0f);
-        auto disc = Rectangle<float> (d, d).withCentre (r.getCentre());
-        g.setColour (Look::edgeLo);
-        g.fillEllipse (disc.translated (1.5f, 2.0f));
-        g.setColour (Look::screen);
-        g.fillEllipse (disc);
-        g.setColour (Look::edgeHi.withAlpha (0.55f));
-        g.drawEllipse (disc.reduced (1.0f), 1.5f);
-
-        const float a0 = MathConstants<float>::pi * 1.25f, a1 = -MathConstants<float>::pi * 0.25f;
-        auto at = [&] (float ang, float rad) { return disc.getCentre() + Point<float> (std::cos (ang) * rad, -std::sin (ang) * rad); };
-        g.setColour (Look::ink.withAlpha (0.6f));
-        for (float ang : { a0, a1 }) g.drawLine (Line<float> (at (ang, d * 0.52f), at (ang, d * 0.62f)), 2.0f);
-        const float range = (float) jmax (1, maxV() - minV());
-        const float ang = a0 + (a1 - a0) * (float) (value() - minV()) / range;
-        g.setColour (Look::screenText);
-        g.drawLine (Line<float> (at (ang, d * 0.08f), at (ang, d * 0.42f)), 3.0f);
-    }
-
-    void mouseDown (const MouseEvent& e) override
-    {
-        startY = e.position.y; startV = value();
-        dragged = false;
-        attach.beginGesture();
-    }
-    void mouseDrag (const MouseEvent& e) override
-    {
-        const float range = (float) (maxV() - minV());
-        const float perPixel = range / (e.mods.isShiftDown() ? 600.0f : 150.0f);
-        if (std::abs (startY - e.position.y) > 3.0f) dragged = true;
-        set (startV + roundToInt ((startY - e.position.y) * perPixel));
-    }
-    void mouseUp (const MouseEvent&) override
-    {
-        if (! dragged && maxV() - minV() == 1) set (value() == minV() ? maxV() : minV());   // a two-way switch: click flips it
-        attach.endGesture();
-    }
-    void mouseDoubleClick (const MouseEvent&) override
-    {
-        attach.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
-    }
-    void mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w) override
-    {
-        wheel += w.deltaY * 8.0f;
-        const int steps = (int) wheel;
-        if (steps != 0) { wheel -= (float) steps; attach.setValueAsCompleteGesture ((float) jlimit (minV(), maxV(), value() + steps)); }
-    }
-
-    RangedAudioParameter& param;
-    String label;
-    std::function<String (int)> format;
-    ParameterAttachment attach;
-    float startY = 0.0f, wheel = 0.0f;
-    int startV = 0;
-    bool dragged = false;
-};
-
-// ---------------------------------------------------------------------------
-// the editor
-// ---------------------------------------------------------------------------
 namespace
 {
-    constexpr int W = 940, H = 560;
-    const Rectangle<int> stepsPanel  { 24, 100, 892, 196 };
-    const Rectangle<int> toolsPanel  { 24, 312, 572, 224 };
-    const Rectangle<int> knobsPanel  { 612, 312, 304, 224 };
+    struct MixerWindow : public DocumentWindow
+    {
+        explicit MixerWindow (std::function<void()> closeFn)
+            : DocumentWindow ("Four Tracker - Mixer", Theme::background, DocumentWindow::closeButton), onCloseClicked (std::move (closeFn)) {}
+        void closeButtonPressed() override { if (onCloseClicked) onCloseClicked(); }
+        std::function<void()> onCloseClicked;
+    };
 }
 
-BreakbeatEditor::BreakbeatEditor (BreakbeatProcessor& p)
-    : AudioProcessorEditor (p), proc (p)
+MixerPanel* FourTrackerEditor::getMixer()
 {
-    for (int i = 0; i < bb::kNumSteps; ++i)
+    return mixerWindow != nullptr ? dynamic_cast<MixerPanel*> (mixerWindow->getContentComponent()) : nullptr;
+}
+
+void FourTrackerEditor::toggleMixer()
+{
+    if (mixerWindow != nullptr)
     {
-        auto* pad = pads.add (new StepPad (*this, i));
-        addAndMakeVisible (pad);
-        if (auto* param = proc.params.getParameter (BreakbeatProcessor::stepId (i)))
+        // closed from its own key handler or close button: delete it after the call returns
+        Component::SafePointer<FourTrackerEditor> safe (this);
+        MessageManager::callAsync ([safe] { if (safe != nullptr) { safe->mixerWindow.reset(); safe->mixButton.setToggleState (false, dontSendNotification); safe->grabKeyboardFocus(); } });
+        mixerWindow->setVisible (false);
+        state.setStatus ("MIXER CLOSED");
+        state.changed();
+        return;
+    }
+    auto* panel = new MixerPanel (state);
+    panel->onKey = [this] (const KeyPress& k) { return keyPressed (k); };
+    panel->onClose = [this] { toggleMixer(); };
+    panel->onKeyState = [this] (bool down) { return keyStateChanged (down); };
+    auto w = std::make_unique<MixerWindow> ([this] { toggleMixer(); });
+    w->setUsingNativeTitleBar (true);
+    w->setContentOwned (panel, true);
+    w->setResizable (false, false);
+    w->setAlwaysOnTop (true);
+    auto* win = w.get();
+    panel->onWidthChanged = [win] (int width) { win->setContentComponentSize (width, MixerPanel::kHeight); };
+    const auto b = getScreenBounds();
+    w->setTopLeftPosition (jmax (0, b.getCentreX() - w->getWidth() / 2), jmax (0, b.getY() + 120));
+    w->setVisible (true);
+    mixerWindow = std::move (w);
+    mixButton.setToggleState (true, dontSendNotification);
+    state.setStatus ("MIXER: SHIFT+M OR MIX CLOSES IT");
+    state.changed();
+}
+
+void FourTrackerEditor::paint (Graphics& g)
+{
+    g.fillAll (Theme::background);
+}
+
+void FourTrackerEditor::resized()
+{
+    const float scale = jmin (getWidth() / (float) kDesignW, getHeight() / (float) kDesignH);
+    root.setBounds (0, 0, kDesignW, kDesignH);
+    root.setTransform (AffineTransform::scale (scale));
+
+    title.setBounds (14, 10, 1508, 66);
+    header.setBounds (14, 84, 1508, 106);
+
+    const Rectangle<int> content (14, 196, 1508, 732);
+    strips.setBounds (14, 196, 1508, 174);
+    songPanel.setBounds (14, 196, 1508, 174);
+    blockPanel.setBounds (14, 196, 1508, 174);
+    layoutPatternView();
+    instrumentsPage.setBounds (content);
+    sampleEditPage.setBounds (content);
+    settingsPage.setBounds (content);
+    sampleBrowser.setBounds (14, 84, 1508, 844);   // covers header + page, leaves the tabs
+    {
+        // - TRACKS n + sits in the title bar, left of the FX button (FX build) or the grid icon
+        bool fxBuild = false;
+       #if FOURTRACKER_FX_HOST
+        fxBuild = fxPage != nullptr;
+       #endif
+        const int right = fxBuild ? 1330 : 1446;
+        trackCount.setBounds (right - 196, 18, 196, 50);
+        masterVolume.setBounds (trackCount.getX() - 206, 18, 196, 50);
+        recBar.setBounds (masterVolume.getX() - 282, 18, 272, 50);
+        mixButton.setBounds ((recBar.isVisible() ? recBar.getX() : masterVolume.getX()) - 104, 18, 94, 50);
+        title.rightReserve = (float) (1456 - mixButton.getX() + 24);
+        title.titleMaxWidth = (float) (mixButton.getX() - title.getX() - 6);
+    }
+   #if FOURTRACKER_FX_HOST
+    if (fxPage != nullptr) fxPage->setBounds (14, 84, 1508, 844);
+    if (fxBar != nullptr)  fxBar->setBounds (14, 374, 1508, 46);
+    fxButton.setBounds (1340, 18, 104, 50);
+   #endif
+
+    // bottom tab bar: six entries
+    int x = 14;
+    const int y = 936, h = 66, gap = 10;
+    auto place = [&] (PixelButton& b, int w) { b.setBounds (x, y, w, h); x += w + gap; };
+    place (tabInstruments, 290);
+    place (tabSample, 284);
+    place (tabSong, 300);
+    place (tabBlock, 210);
+    place (tabSettings, 260);
+    tabTracks.setBounds (x, y, 1522 - x, h);
+}
+
+void FourTrackerEditor::showPage (Page p)
+{
+    if (sampleBrowser.isVisible()) sampleBrowser.close();
+   #if FOURTRACKER_FX_HOST
+    if (fxPage != nullptr && fxPage->isVisible()) fxPage->close();
+   #endif
+    page = p;
+    const bool patternPage = (p == Page::Tracks || p == Page::Song || p == Page::Block);
+    patternView.setVisible (patternPage);
+    strips.setVisible (p == Page::Tracks);
+   #if FOURTRACKER_FX_HOST
+    if (fxBar != nullptr) fxBar->setVisible (p == Page::Tracks);
+   #endif
+    layoutPatternView();
+    songPanel.setVisible (p == Page::Song);
+    blockPanel.setVisible (p == Page::Block);
+    instrumentsPage.setVisible (p == Page::Instruments);
+    sampleEditPage.setVisible (p == Page::SampleEdit);
+    settingsPage.setVisible (p == Page::Settings);
+
+    tabInstruments.setToggleState (p == Page::Instruments, dontSendNotification);
+    tabSample.setToggleState (p == Page::SampleEdit, dontSendNotification);
+    tabSong.setToggleState (p == Page::Song, dontSendNotification);
+    tabBlock.setToggleState (p == Page::Block, dontSendNotification);
+    tabSettings.setToggleState (p == Page::Settings, dontSendNotification);
+    tabTracks.setToggleState (p == Page::Tracks, dontSendNotification);
+
+    if (p == Page::Instruments) instrumentsPage.instrumentsChanged();
+    if (p == Page::SampleEdit)  sampleEditPage.instrumentsChanged();
+    grabKeyboardFocus();
+}
+
+void FourTrackerEditor::layoutPatternView()
+{
+    // with the FX bar under the channel strips, the pattern starts a little lower on the tracks page
+    bool bar = false;
+   #if FOURTRACKER_FX_HOST
+    bar = fxBar != nullptr && page == Page::Tracks;
+   #endif
+    const bool patternPage = page == Page::Tracks || page == Page::Song || page == Page::Block;
+    const bool nav = patternPage;   // always there on the pattern pages (arrows grey with 4 tracks)
+    const int top = bar ? 424 : 376, bottom = 924, navH = 46, routeH = bar ? 42 : 0;
+    patternView.setBounds (18, top, 1500, bottom - top - (nav ? navH + 6 : 0) - (routeH > 0 ? routeH + 4 : 0));
+   #if FOURTRACKER_FX_HOST
+    if (routeBar != nullptr)
+    {
+        routeBar->setVisible (bar);
+        if (bar) routeBar->setBounds (14, patternView.getBottom() + 4, 1508, routeH);
+    }
+   #endif
+    trackNav.setVisible (nav);
+    if (nav) trackNav.setBounds (14, bottom - navH + 4, 1508, navH);
+}
+
+#if FOURTRACKER_FX_HOST
+void FourTrackerEditor::toggleFxPage()
+{
+    if (fxPage == nullptr) return;
+    if (fxPage->isVisible()) { fxPage->close(); return; }
+    if (sampleBrowser.isVisible()) sampleBrowser.close();
+    fxButton.setToggleState (true, dontSendNotification);
+    fxPage->open();
+}
+#endif
+
+void FourTrackerEditor::addTrack()
+{
+    removeTrackAsked = -1;
+    const int n = proc.getNumChannels();
+    if (n >= kNumChannels) { state.setStatus ("16 TRACKS IS THE MOST"); state.changed(); return; }
+    proc.setNumChannels (n + 1);
+    state.cursorCh = n;                    // go to the new track
+    state.cursorCol = 0;
+    state.setStatus ("TRACK " + String (n + 1) + " ADDED");
+    grabKeyboardFocus();
+    refreshAll();
+}
+
+void FourTrackerEditor::removeTrack()
+{
+    const int n = proc.getNumChannels();
+    if (n <= 1) { state.setStatus ("ONE TRACK IS THE LEAST"); state.changed(); return; }
+    if (proc.trackHasNotes (n - 1) && removeTrackAsked != n)
+    {
+        removeTrackAsked = n;
+        state.setStatus ("TRACK " + String (n) + " HAS NOTES - PRESS - AGAIN TO DELETE IT");
+        state.changed();
+        return;
+    }
+    removeTrackAsked = -1;
+    proc.setNumChannels (n - 1);
+    state.setStatus ("TRACK " + String (n) + " REMOVED");
+    grabKeyboardFocus();
+    refreshAll();
+}
+
+void FourTrackerEditor::updateChannelView()
+{
+    const int n = state.numChannels(), first = state.firstVisibleChannel();
+    trackCount.setCount (n);
+    const int key = n * 100 + first;
+    if (key == lastViewKey) return;
+    const bool countChanged = lastViewKey / 100 != n;
+    lastViewKey = key;
+    trackNav.setState (first / kVisibleChannels, n);
+    if (countChanged) layoutPatternView();
+   #if FOURTRACKER_FX_HOST
+    if (fxBar != nullptr)  fxBar->setView (first, n);
+    if (routeBar != nullptr) routeBar->setView (first, n);
+    if (fxPage != nullptr) fxPage->setView (first, n);
+   #endif
+    strips.refresh();
+    patternView.repaint();
+    title.refresh();
+}
+
+void FourTrackerEditor::refreshAll()
+{
+    updateChannelView();
+    header.refresh();
+    title.refresh();
+    songPanel.refresh();
+    strips.refresh();
+    settingsPage.refresh();
+    if (instrumentsPage.isVisible()) instrumentsPage.instrumentsChanged();
+    if (sampleEditPage.isVisible())  sampleEditPage.instrumentsChanged();
+    patternView.repaint();
+    root.repaint();
+}
+
+void FourTrackerEditor::changeListenerCallback (ChangeBroadcaster*)
+{
+    refreshAll();
+}
+
+void FourTrackerEditor::timerCallback()
+{
+    // MIDI knobs moved synth sliders, or a knob was learned
+    if (const int kr = proc.knobRevision.load(); kr != lastKnobRevision)
+    {
+        lastKnobRevision = kr;
+        if (instrumentsPage.isVisible()) instrumentsPage.instrumentsChanged();
+        const auto msg = proc.takeKnobMessage();
+        if (msg.isNotEmpty()) state.setStatus (msg);
+    }
+    updateChannelView();
+    header.refresh();
+    title.refresh();
+    if (patternView.isVisible()) patternView.refreshFromEngine();
+    if (strips.isVisible())      strips.refresh();
+    if (songPanel.isVisible())   songPanel.refresh();
+    if (sampleEditPage.isVisible()) sampleEditPage.refresh();
+    if (settingsPage.isVisible()) settingsPage.refresh();
+}
+
+// ===========================================================================
+// keyboard
+// ===========================================================================
+
+bool FourTrackerEditor::keyPressed (const KeyPress& k)
+{
+    const int code = k.getKeyCode();
+    const auto mods = k.getModifiers();
+    auto& e = proc.getEngine();
+
+    if (sampleBrowser.isVisible()) return sampleBrowser.keyPressed (k);
+    // Shift+M: the MIXER window
+    if ((code == 'M' || code == 'm') && mods.isShiftDown() && ! mods.isCommandDown() && ! mods.isAltDown()) { toggleMixer(); return true; }
+   #if FOURTRACKER_FX_HOST
+    if (fxPage != nullptr && (fxPage->isVisible() || code == KeyPress::F8Key))
+    {
+        if (fxPage->isVisible()) return fxPage->keyPressed (k);
+        toggleFxPage();
+        return true;
+    }
+   #endif
+
+    // Sample Edit: Ctrl+A / C / X / V / Delete work on the waveform once it has been clicked
+    if (page == Page::SampleEdit && sampleEditPage.handleKey (k)) return true;
+
+    // transport and global keys
+    if (code == KeyPress::returnKey && ! mods.isAnyModifierKeyDown()) { e.requestStartStop(); return true; }
+    if (code == KeyPress::spaceKey)
+    {
+        state.setEditMode (! state.editMode);
+        return true;
+    }
+    if (code == KeyPress::escapeKey) { e.requestStop(); return true; }
+    if (code == KeyPress::F1Key) { state.octave = jmax (0, state.octave - 1); title.refresh(); header.refresh(); return true; }
+    if (code == KeyPress::F2Key) { state.octave = jmin (7, state.octave + 1); title.refresh(); header.refresh(); return true; }
+    if (code == KeyPress::F6Key) { state.editStep = jmax (0, state.editStep - 1); title.refresh(); header.refresh(); return true; }
+    if (code == KeyPress::F7Key) { state.editStep = jmin (32, state.editStep + 1); title.refresh(); header.refresh(); return true; }
+    // REC / STOP (the program only): F3 / F4 without Shift or Ctrl (with them they cut / copy tracks and blocks)
+    if (recBar.isVisible() && ! mods.isShiftDown() && ! mods.isCommandDown() && ! mods.isCtrlDown())
+    {
+        if (code == KeyPress::F3Key) { recBar.pressRec();  return true; }
+        if (code == KeyPress::F4Key) { recBar.pressStop(); return true; }
+    }
+    if (code == KeyPress::F9Key)  { showPage (Page::Tracks); return true; }
+    if (code == KeyPress::F10Key) { showPage (Page::Instruments); return true; }
+    if (code == KeyPress::F11Key) { showPage (Page::SampleEdit); return true; }
+    if (code == KeyPress::F12Key) { showPage (Page::Settings); return true; }
+
+    // numpad +/- picks the instrument, like most trackers
+    if (code == KeyPress::numberPadAdd || code == KeyPress::numberPadSubtract)
+    {
+        proc.selectedInstrument = jlimit (1, kNumInstruments - 1, proc.selectedInstrument + (code == KeyPress::numberPadAdd ? 1 : -1));
+        refreshAll();
+        return true;
+    }
+
+    // A held key is auto-repeated by Windows. A note key that is already held
+    // must not start the sample again (that made it stutter on the first part).
+    const int noteKey = patternView.noteForKey (k);
+    if (noteKey > 0)
+    {
+        const int kc = (int) CharacterFunctions::toUpperCase ((juce_wchar) code);
+        if (heldNoteKeys.count (kc) > 0) return true;     // repeat: ignore
+        heldNoteKeys.insert (kc);
+        jamNoteDown = true;
+        jamInstrument = proc.selectedInstrument;
+
+        // CHORD: each held key on its own track (pattern pages, Instruments, Sample Edit)
+        const bool notePlace = patternView.isVisible() ? (! state.editMode || state.cursorCol == 0)
+                                                       : (page == Page::Instruments || page == Page::SampleEdit);
+        if (proc.chordMode && notePlace && ! mods.isAnyModifierKeyDown() && chordNoteDown (kc, noteKey))
         {
-            stepAttachments.push_back (std::make_unique<ParameterAttachment> (*param, [pad] (float) { pad->repaint(); }, nullptr));
-            stepAttachments.back()->sendInitialUpdate();
+            title.refresh(); header.refresh();
+            return true;
         }
     }
 
-    const char* tips[] = { "",
-        "1/4: restart from the first quarter of the slice (it plays on after this step)",
-        "2/4: restart from the second quarter of the slice",
-        "3/4: restart from the third quarter of the slice",
-        "4/4: restart from the last quarter of the slice",
-        "REVERSE: this step plays backwards",
-        "STOP: silence",
-        "BIT: bit crusher (BITS and RATE knobs)" };
-    for (int a = bb::Q1; a < bb::NumActions; ++a)
+    if (patternView.isVisible())
     {
-        auto* t = tools.add (new ToolButton (a));
-        t->setTooltip (String (tips[a]) + ". Click the tool, then click or drag over the steps.");
-        t->onClick = [this, a] { setBrush (brush == a ? -1 : a); };
-        addAndMakeVisible (t);
-    }
-    clearButton = std::make_unique<ToolButton> (bb::Thru, "CLEAR");
-    clearButton->setTooltip ("Pick the eraser (click a step to empty it). Click it twice to empty every step.");
-    clearButton->onClick = [this]
-    {
-        if (brush == bb::Thru) { proc.applyPattern ({}); setBrush (-1); }
-        else setBrush (bb::Thru);
-    };
-    randomButton = std::make_unique<ToolButton> (-1, "RANDOM");
-    randomButton->setTooltip ("A new random break");
-    randomButton->onClick = [this] { randomise(); };
-    patternButton = std::make_unique<ToolButton> (-1, "PATTERNS");
-    patternButton->setTooltip ("Ready-made patterns");
-    patternButton->onClick = [this] { showPatternMenu(); };
-    aheadButton = std::make_unique<ToolButton> (-1, "READ AHEAD");
-    aheadButton->setTooltip ("On: the plugin reads the whole SLICE of the track before it is heard (latency = SLICE; "
-                             "for DAWs with plugin delay compensation). Off: no delay, parts not heard yet come from the last time round.");
-    if (auto* ap = proc.params.getParameter ("ahead"))
-    {
-        aheadAttachment = std::make_unique<ParameterAttachment> (*ap, [this] (float v) { aheadButton->setSelected (v > 0.5f); repaint (statusArea); }, nullptr);
-        aheadAttachment->sendInitialUpdate();
-        aheadButton->onClick = [this] { aheadAttachment->setValueAsCompleteGesture (aheadButton->selected ? 0.0f : 1.0f); };
-    }
-    for (auto* b : { clearButton.get(), randomButton.get(), patternButton.get(), aheadButton.get() }) addAndMakeVisible (b);
+        if (patternView.handleKey (k)) { title.refresh(); header.refresh(); return true; }
 
-    auto addKnob = [this] (const String& id, const String& name, std::function<String (int)> fmt, const String& tip)
-    {
-        if (auto* param = dynamic_cast<RangedAudioParameter*> (proc.params.getParameter (id)))
+        // not in edit mode: computer keys jam the selected instrument
+        const int n = patternView.noteForKey (k);
+        if (n > 0)
         {
-            auto* k = knobs.add (new Knob (*param, name, std::move (fmt)));
-            k->setTooltip (tip);
-            addAndMakeVisible (k);
+            e.requestPreview (proc.selectedInstrument, n);
+            jamNoteDown = true;
+            return true;
         }
-    };
-    auto rowsText = [] (int v) { return String (8 << jlimit (0, 3, v)) + " ROWS"; };
-    addKnob ("length", "SLICE", rowsText,
-             "How much of the channel's sound is cut into the quarters 1/4 - 4/4: 8, 16, 32 or 64 rows (1/2, 1, 2 or 4 bars in a DAW), "
-             "whatever plays there: one long break, short samples, a bassline ...");
-    addKnob ("steps", "STEPS", rowsText,
-             "How much of the track the 8 steps cover: 8, 16, 32 or 64 rows (at most SLICE). They repeat over the slice.");
-    addKnob ("smooth", "SMOOTH", [] (int v) { return String (v) + " MS"; }, "Cross-fade between steps (no clicks)");
-    addKnob ("mix", "MIX", [] (int v) { return String (v) + "%"; }, "Dry / processed");
-    addKnob ("bits", "BITS", [] (int v) { return String (v) + " BIT"; }, "BIT steps: bit depth (lower = dirtier)");
-    addKnob ("rate", "RATE", [] (int v) { return v <= 1 ? String ("OFF") : "1/" + String (v); },
-             "BIT steps: sample-rate reduction (higher = more aliasing)");
-    addKnob ("tempo", "TEMPO", [] (int v) { return String (v) + " BPM"; },
-             "Own tempo, used only when the host sends no tempo: then the steps start with the first sound (row 0) and stop after half a second of silence");
-    addKnob ("sync", "SYNC", [] (int v) { return String (v == 0 ? "SONG" : "SOUND"); },
-             "SONG: the steps follow the host's song position (DAWs). SOUND: they start with the first sound on the channel "
-             "after a silence, at the host's tempo (trackers like MadTracker: row 0 = the first note). Click to switch.");
-
-    setSize (W, H);
-    startTimerHz (30);
-}
-
-BreakbeatEditor::~BreakbeatEditor() { stopTimer(); }
-
-int BreakbeatEditor::getRowsPerStep() const
-{
-    auto* len = proc.params.getRawParameterValue ("length");
-    auto* st  = proc.params.getRawParameterValue ("steps");
-    if (len != nullptr && st != nullptr)
-        return 1 << jlimit (0, 3, jmin (roundToInt (st->load()), roundToInt (len->load())));
-    return 2;
-}
-
-int BreakbeatEditor::getStepAction (int step) const
-{
-    if (auto* v = proc.params.getRawParameterValue (BreakbeatProcessor::stepId (step)))
-        return jlimit (0, (int) bb::NumActions - 1, roundToInt (v->load()));
-    return 0;
-}
-
-void BreakbeatEditor::setStepAction (int step, int action)
-{
-    if (! isPositiveAndBelow (step, (int) stepAttachments.size()) || getStepAction (step) == action) return;
-    stepAttachments[(size_t) step]->setValueAsCompleteGesture ((float) action);
-}
-
-void BreakbeatEditor::setBrush (int action)
-{
-    brush = action;
-    for (auto* t : tools) t->setSelected (t->action == brush);
-    clearButton->setSelected (brush == bb::Thru);
-    for (auto* p : pads) p->setMouseCursor (brush >= 0 ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
-    repaint (toolsPanel);
-}
-
-void BreakbeatEditor::stepPressed (int step, const MouseEvent&)
-{
-    if (brush < 0) { showStepMenu (step); return; }
-    // clicking a step that already has the tool empties it again
-    setStepAction (step, getStepAction (step) == brush ? (int) bb::Thru : brush);
-}
-
-void BreakbeatEditor::stepDragged (const MouseEvent& e)
-{
-    if (brush < 0) return;
-    const auto pos = e.getEventRelativeTo (this).getPosition();
-    for (auto* p : pads)
-        if (p->getBounds().contains (pos) && p != e.eventComponent)
-            setStepAction (p->index, brush);
-}
-
-void BreakbeatEditor::showStepMenu (int step)
-{
-    PopupMenu m;
-    m.addSectionHeader ("STEP " + String (step + 1));
-    const int now = getStepAction (step);
-    const char* names[] = { "- (play on)", "1/4  restart from the first quarter", "2/4  restart from the second quarter",
-                            "3/4  restart from the third quarter", "4/4  restart from the last quarter", "REVERSE", "STOP", "BITCRUSH" };
-    for (int a = 0; a < bb::NumActions; ++a)
-        m.addItem (a + 1, names[a], true, a == now);
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (pads[step]),
-                     [safe = Component::SafePointer<BreakbeatEditor> (this), step] (int r)
-                     {
-                         if (safe != nullptr && r > 0) safe->setStepAction (step, r - 1);
-                     });
-}
-
-void BreakbeatEditor::showPatternMenu()
-{
-    PopupMenu m;
-    const auto& list = BreakbeatProcessor::patterns();
-    for (int i = 0; i < (int) list.size(); ++i) m.addItem (i + 1, list[(size_t) i].name);
-    m.showMenuAsync (PopupMenu::Options().withTargetComponent (patternButton.get()),
-                     [safe = Component::SafePointer<BreakbeatEditor> (this)] (int r)
-                     {
-                         if (safe != nullptr && r > 0) safe->proc.applyPattern (BreakbeatProcessor::patterns()[(size_t) r - 1].steps);
-                     });
-}
-
-void BreakbeatEditor::randomise()
-{
-    // mostly slices, some straight steps, now and then a reverse, stop or crush
-    std::array<int, bb::kNumSteps> s {};
-    for (auto& a : s)
-    {
-        const int r = rng.nextInt (100);
-        a = r < 22 ? (int) bb::Thru : r < 80 ? (int) bb::Q1 + rng.nextInt (4) : r < 89 ? (int) bb::Rev : r < 94 ? (int) bb::Stop : (int) bb::Bit;
     }
-    s[0] = rng.nextBool() ? (int) bb::Thru : (int) bb::Q1;    // keep the downbeat
-    proc.applyPattern (s);
+    else if (page == Page::Instruments || page == Page::SampleEdit)
+    {
+        const int n = patternView.noteForKey (k);
+        if (n > 0 && ! mods.isAnyModifierKeyDown())
+        {
+            e.requestPreview (proc.selectedInstrument, n);
+            jamNoteDown = true;
+            return true;
+        }
+    }
+
+    return false;
 }
 
-void BreakbeatEditor::timerCallback()
+bool FourTrackerEditor::chordNoteDown (int keyCode, int note)
 {
-    const int rps = getRowsPerStep();
-    if (rps != shownRowsPerStep) { shownRowsPerStep = rps; for (auto* p : pads) p->repaint(); }
-    const int now = proc.getCurrentStep();
-    if (now != playing)
+    // the first free place in the chord: 0 = the cursor's track, 1 = the next track ...
+    if (chordKeys.empty()) { chordBaseCh = state.cursorCh; chordRow = state.cursorRow; }
+    int offset = 0;
+    for (bool used = true; used; )
     {
-        const int old = playing;
-        playing = now;
-        if (isPositiveAndBelow (old, pads.size())) pads[old]->repaint();
-        if (isPositiveAndBelow (now, pads.size())) pads[now]->repaint();
-        repaint (statusArea);
+        used = false;
+        for (auto& [key, ck] : chordKeys) if (ck.offset == offset) { used = true; ++offset; break; }
     }
-    const double bpm = proc.getHostBpm();
-    if (std::abs (bpm - shownBpm) > 0.05 || proc.hostIsPlaying() != shownPlaying || proc.isUsingOwnClock() != shownOwn)
+    const int ch = chordBaseCh + offset;
+    if (ch >= state.numChannels())
     {
-        shownOwn = proc.isUsingOwnClock();
-        shownBpm = bpm;
-        shownPlaying = proc.hostIsPlaying();
-        repaint (statusArea);
+        state.setStatus ("CHORD: NO MORE TRACKS TO THE RIGHT - ADD TRACKS WITH + OR START FURTHER LEFT");
+        return true;   // swallow the key: it has no track to go to
+    }
+    const int inst = proc.selectedInstrument;
+    chordKeys[keyCode] = { offset, ch, inst };
+
+    auto& e = proc.getEngine();
+    if (patternView.isVisible() && state.editMode)
+    {
+        // the first note goes where the cursor is and moves it on; the others go on the same row, next tracks
+        patternView.writeChordNote (chordRow, ch, note, offset == 0 && chordKeys.size() == 1);
+        if (! e.playing.load()) e.requestJam (inst, note, ch);
+        state.changed();
+    }
+    else
+    {
+        e.requestJam (inst, note, ch);
+    }
+    return true;
+}
+
+void FourTrackerEditor::releaseChordKeys (bool all)
+{
+    for (auto it = chordKeys.begin(); it != chordKeys.end();)
+    {
+        const int kc = it->first;
+        const bool down = ! all && (KeyPress::isKeyCurrentlyDown (kc) || (kc >= 'A' && kc <= 'Z' && KeyPress::isKeyCurrentlyDown (kc + 32)));
+        if (down) { ++it; continue; }
+        // like a single note: a sample without a loop plays to its end; loops, synths and MIDI notes stop
+        const auto& in = proc.getInstrument (it->second.inst);
+        if (! in.isEmpty() && (in.params.loop || in.isMidi()))
+            proc.getEngine().requestJamOff (it->second.channel);
+        it = chordKeys.erase (it);
     }
 }
 
-void BreakbeatEditor::paint (Graphics& g)
+bool FourTrackerEditor::keyStateChanged (bool isKeyDown)
 {
-    g.fillAll (Look::background);
+    if (isKeyDown) return false;
 
-    // title
-    Look::text (g, "BREAKBEAT PROCESSOR", { 30.0f, 26.0f, 600.0f, 36.0f }, 34.0f, Look::ink, Justification::centredLeft, true);
-    Look::text (g, "8 STEP BREAKBEAT SLICER  -  VST3", { 32.0f, 70.0f, 600.0f, 14.0f }, 11.0f, Look::edgeLo.darker (0.4f));
-
-    // status screen: tempo and step
-    statusArea = { 652, 24, 264, 58 };
-    auto st = statusArea.toFloat();
-    Look::screenBox (g, st);
-    auto top = st.reduced (12.0f, 9.0f);
-    String bpmText = shownBpm > 0.0 ? String (shownBpm, 1) + " BPM" : String ("NO TEMPO");
-    if (shownOwn)
+    // forget note keys that have been released
+    for (auto it = heldNoteKeys.begin(); it != heldNoteKeys.end();)
     {
-        auto* sync = proc.params.getRawParameterValue ("sync");
-        bpmText << (sync != nullptr && sync->load() > 0.5f ? "  SOUND" : "  OWN");
+        const int kc = *it;
+        const bool down = KeyPress::isKeyCurrentlyDown (kc)
+                       || (kc >= 'A' && kc <= 'Z' && KeyPress::isKeyCurrentlyDown (kc + 32));
+        it = down ? std::next (it) : heldNoteKeys.erase (it);
     }
-    if (aheadButton != nullptr && aheadButton->selected) bpmText << "  AHEAD";
-    Look::text (g, bpmText, top.removeFromTop (18.0f), 16.0f, Look::screenText, Justification::centredLeft, true);
-    const String stepText = shownPlaying && playing >= 0
-                              ? "STEP " + String (playing + 1) + " / 8   ROW " + String (playing * getRowsPerStep()).paddedLeft ('0', 2)
-                              : String (shownOwn ? "WAITING FOR SOUND" : "STOPPED - PRESS PLAY");
-    Look::text (g, stepText, top.removeFromBottom (14.0f), 11.0f, shownPlaying ? Look::red.brighter (0.3f) : Look::screenDim);
 
-    Look::panelBox (g, stepsPanel.toFloat());
-    Look::panelBox (g, toolsPanel.toFloat());
-    Look::panelBox (g, knobsPanel.toFloat());
+    releaseChordKeys (false);
 
-    Look::text (g, "TOOLS", { (float) toolsPanel.getX() + 16.0f, (float) toolsPanel.getY() + 12.0f, 200.0f, 14.0f }, 12.0f, Look::ink, Justification::centredLeft, true);
-
-    // help text, like the sketch
-    const char* help[] = {
-        "PICK A TOOL, THEN CLICK OR DRAG OVER THE STEPS (CLICK AGAIN TO EMPTY).",
-        "RIGHT-CLICK A STEP FOR THE MENU. 1/4 - 4/4 RESTART FROM THAT QUARTER,",
-        "ARROW = REVERSE, SQUARE = STOP, BIT = CRUSH, EMPTY = PLAY ON.",
-        "SLICE + STEPS: 8 / 16 / 32 / 64 ROWS (1/2 - 4 BARS). RUNS WHILE IT PLAYS." };
-    float y = (float) toolsPanel.getBottom() - 70.0f;
-    for (auto* line : help)
+    if (heldNoteKeys.empty() && jamNoteDown)
     {
-        Look::text (g, line, { (float) toolsPanel.getX() + 18.0f, y, (float) toolsPanel.getWidth() - 30.0f, 10.0f }, 8.0f, Look::ink.withAlpha (0.75f));
-        y += 15.0f;
+        jamNoteDown = false;
+        // A sample without a loop always plays to its end, like in ProTracker.
+        // A looped sample would ring forever, so it stops when the key is released.
+        const auto& in = proc.getInstrument (jamInstrument);
+        if (! in.isEmpty() && in.params.loop)
+            proc.getEngine().requestStopPreview();
+    }
+    return false;
+}
+
+void FourTrackerEditor::focusLost (FocusChangeType)
+{
+    heldNoteKeys.clear();
+    releaseChordKeys (true);
+    if (jamNoteDown)
+    {
+        jamNoteDown = false;
+        const auto& in = proc.getInstrument (jamInstrument);
+        if (! in.isEmpty() && in.params.loop)
+            proc.getEngine().requestStopPreview();
     }
 }
 
-void BreakbeatEditor::resized()
+// ===========================================================================
+// drag and drop
+// ===========================================================================
+
+bool FourTrackerEditor::isInterestedInFileDrag (const StringArray& files)
 {
-    // 8 steps
-    const int padW = 96, gap = 12;
-    const int x0 = stepsPanel.getX() + (stepsPanel.getWidth() - (8 * padW + 7 * gap)) / 2;
-    for (int i = 0; i < pads.size(); ++i)
-        pads[i]->setBounds (x0 + i * (padW + gap), stepsPanel.getY() + 16, padW, stepsPanel.getHeight() - 24);
-
-    // tools
-    int x = toolsPanel.getX() + 16;
-    const int ty = toolsPanel.getY() + 36;
-    for (auto* t : tools) { t->setBounds (x, ty, 70, 52); x += 77; }
-    const int by = ty + 64;
-    clearButton->setBounds   (toolsPanel.getX() + 16, by, 120, 42);
-    randomButton->setBounds  (toolsPanel.getX() + 144, by, 120, 42);
-    patternButton->setBounds (toolsPanel.getX() + 272, by, 130, 42);
-    aheadButton->setBounds   (toolsPanel.getX() + 410, by, 146, 42);
-
-    // knobs: SAMPLE STEPS SMOOTH MIX / BITS RATE TEMPO
-    const int kw = 70, kh = 96;
-    const int kx = knobsPanel.getX() + 10, ky = knobsPanel.getY() + 12;
-    for (int i = 0; i < knobs.size(); ++i)
+    for (auto& f : files)
     {
-        const int row = i < 4 ? 0 : 1, col = i < 4 ? i : i - 4;
-        knobs[i]->setBounds (kx + col * (kw + 4), ky + row * (kh + 4), kw, kh);
+        const File file (f);
+        if (file.hasFileExtension ("ftm;ftps")) return true;
+        if (proc.getFormatManager().findFormatForFileExtension (file.getFileExtension()) != nullptr) return true;
+        if (file.hasFileExtension ("iff;8svx;8sv;raw;smp;sam;snd;sample") || file.getFileExtension().isEmpty()) return true;
     }
+    return false;
+}
+
+void FourTrackerEditor::filesDropped (const StringArray& files, int, int)
+{
+    Array<File> audio;
+    for (auto& f : files)
+    {
+        const File file (f);
+        if (file.hasFileExtension ("ftm;ftps"))
+        {
+            auto err = proc.loadModule (file);
+            const auto note = proc.takeLoadNote();
+            state.setStatus (err.isNotEmpty() ? err.toUpperCase() : note.isNotEmpty() ? note : "LOADED " + file.getFileName().toUpperCase());
+        }
+        else audio.add (file);
+    }
+
+    int slot = proc.selectedInstrument;
+    for (auto& f : audio)
+    {
+        if (slot >= kNumInstruments) break;
+        auto err = proc.loadInstrument (slot, f);
+        if (err.isNotEmpty()) state.setStatus (err.toUpperCase());
+        else { state.setStatus ("LOADED " + f.getFileName().toUpperCase() + " INTO " + hex2 (slot)); ++slot; }
+    }
+    refreshAll();
 }

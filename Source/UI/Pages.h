@@ -1,0 +1,369 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Four Tracker - Copyright (C) 2026 elcrispo76
+
+#pragma once
+
+#include "Widgets.h"
+#include "WaveformView.h"
+#include "PatternView.h"
+#include "EditorState.h"
+
+/** Interface for the bits of the editor that need refreshing on a timer. */
+struct Refreshable
+{
+    virtual ~Refreshable() = default;
+    virtual void refresh() = 0;
+};
+
+// ===========================================================================
+// Track view top: four channel strips
+// ===========================================================================
+
+class ChannelStrip : public juce::Component, public Refreshable
+{
+public:
+    ChannelStrip (EditorState& s, int channel);
+    void setChannel (int c);   // the strips follow the 4 channels in view
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void refresh() override;
+
+private:
+    EditorState& st;
+    int ch;
+    WaveformView wave { false };
+    ValueBox vol { 0, 64, 64, 24.0f }, pan { -64, 64, 0, 24.0f }, pitch { -24, 24, 0, 24.0f };
+    PixelButton muteBtn { "MUTE", PixelButton::Style::Record, 13.0f },   // lit red when the channel is muted
+                soloBtn { "SOLO", PixelButton::Style::Record, 13.0f };   // lit red when on solo
+    void toggleMute();
+    void toggleSolo();
+    bool soloed = false, silenced = false;
+    int shownInst = -1;
+    const void* shownData = nullptr;
+    float level = 0.0f;
+    bool muted = false;
+    juce::String name;
+};
+
+class ChannelStripsPanel : public juce::Component, public Refreshable
+{
+public:
+    explicit ChannelStripsPanel (EditorState& s);
+    void resized() override;
+    void refresh() override;
+private:
+    EditorState& st;
+    std::vector<std::unique_ptr<ChannelStrip>> strips;
+};
+
+// ===========================================================================
+// Song / Pattern top panel
+// ===========================================================================
+
+class SongPanel : public juce::Component, public Refreshable
+{
+public:
+    explicit SongPanel (EditorState& s);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void refresh() override;
+    void clearEverything (bool loadDemo);   // NEW MODULE, after the user chose Empty or Demo song
+
+private:
+    EditorState& st;
+    PixelButton start { "START", PixelButton::Style::Raised, 16.0f }, stop { "STOP", PixelButton::Style::Raised, 16.0f },
+                newSet { "NEW", PixelButton::Style::Raised, 16.0f },
+                load { "LOAD", PixelButton::Style::Raised, 16.0f }, save { "SAVE", PixelButton::Style::Raised, 16.0f };
+public:
+    PixelButton loadPat { "LOAD", PixelButton::Style::Raised, 16.0f }, savePat { "SAVE", PixelButton::Style::Raised, 16.0f };
+    /** LOAD PATTERN without the file dialog (for the tests): into the pattern in view if it is empty, else the next empty one. */
+    void loadPatternFile (const juce::File& f);
+    void savePatternFile (const juce::File& f);
+    static juce::File patternFolder();
+private:
+    ValueBox length { 1, ft::kMaxRows, ft::kDefaultRows, 32.0f };
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::File lastDir { FourTrackerProcessor::getUserFolder() };
+    juce::File lastModule;
+};
+
+// ===========================================================================
+// Block top panel
+// ===========================================================================
+
+class BlockPanel : public juce::Component
+{
+public:
+    BlockPanel (EditorState& s, PatternView& pv);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    EditorState& st;
+    PixelButton copyTrack { "COPY" }, cutTrack { "CUT" }, pasteTrack { "PASTE" },
+                copyBlock { "COPY" }, cutBlock { "CUT" }, pasteBlock { "PASTE" },
+                octDown { "DOWN" }, noteDown { "DOWN" }, noteUp { "UP" }, octUp { "UP" };
+    juce::Rectangle<int> trackArea, transposeArea, blockArea;
+    static constexpr int kLabelW = 190;
+};
+
+// ===========================================================================
+// The 4 banks of 16 instrument slots (01-10, 11-20, 21-30, 31-40)
+// ===========================================================================
+
+class BankButtons : public juce::Component
+{
+public:
+    explicit BankButtons (EditorState& s);
+    /** Shows the bank of the selected instrument (and the numbers in hex / decimal). */
+    void sync();
+    void resized() override;
+    std::function<void()> onBankChanged;
+    static int bankOf (int slot) { return juce::jlimit (0, ft::kNumBanks - 1, (slot - 1) / ft::kSlotsPerBank); }
+
+private:
+    EditorState& st;
+    std::array<std::unique_ptr<PixelButton>, ft::kNumBanks> buttons;
+    int shownBank = -1;
+    bool shownHex = false;
+};
+
+// ===========================================================================
+// Instrument list (left side of Instruments and Sample Edit)
+// ===========================================================================
+
+class InstrumentList : public juce::Component
+{
+public:
+    explicit InstrumentList (EditorState& s);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    std::function<void()> onSelectionChanged;
+
+private:
+    EditorState& st;
+    PixelButton load { "LOAD", PixelButton::Style::Raised, 19.0f }, discard { "DISCARD", PixelButton::Style::Raised, 19.0f };
+    BankButtons banks { st };
+    juce::Rectangle<float> listArea;
+    int rowAt (float y) const;
+    int firstSlot() const { return BankButtons::bankOf (st.proc.selectedInstrument) * ft::kSlotsPerBank; }
+};
+
+// ===========================================================================
+// Instruments page
+// ===========================================================================
+
+class InstrumentsPage : public juce::Component, public Refreshable
+{
+public:
+    explicit InstrumentsPage (EditorState& s);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void refresh() override;
+    void instrumentsChanged();
+
+private:
+    void push();   // UI -> instrument
+    int slot() const { return st.proc.selectedInstrument; }
+
+    EditorState& st;
+    InstrumentList list;
+    PixelLabel numberLabel { "01", 26.0f, juce::Justification::centred };
+    NameBox name { 20.0f };
+    PixelButton prev { "", PixelButton::Style::Raised }, next { "", PixelButton::Style::Raised };
+    ValueBox volume { 0, 64, 64, 26.0f }, transpose { -48, 48, 0, 26.0f }, finetune { -128, 127, 0, 26.0f };
+    SegmentPair loop, pingPong, reverse;
+    WaveformView wave { false };
+    juce::Rectangle<int> paramsPanel, togglesPanel, infoPanel, dropBar, slotPanel, slotGrid, header;
+    BankButtons slotBanks { st };
+
+    // built-in synth
+    PixelButton srcSample { "SAMPLE", PixelButton::Style::Segment, 17.0f },
+                srcSynth  { "SYNTH 1", PixelButton::Style::Segment, 17.0f },
+                srcSynth2 { "SYNTH 2", PixelButton::Style::Segment, 17.0f },
+                srcMidi   { "MIDI",   PixelButton::Style::Segment, 17.0f };
+    ValueBox midiChannelBox { 1, 16, 1, 30.0f }, midiProgramBox { 0, 128, 0, 30.0f };
+    bool midiMode = false;
+    std::array<std::unique_ptr<PixelButton>, 5> waveButtons;
+    PixelSlider attack { 0, 5000, 2, 2 }, decay { 0, 5000, 250, 250 }, sustain { 0, 64, 40, 40 }, release { 0, 5000, 200, 200 },
+                cutoff { 0, 127, 127, 127 }, resonance { 0, 127, 0, 0 },
+                distortion { 0, 64, 0, 0 }, accent { 0, 64, 0, 0 };
+    bool synthMode = false;
+    std::array<PixelSlider*, 8> synthSliders() { return { &attack, &decay, &sustain, &release, &cutoff, &resonance, &distortion, &accent }; }
+    void showKnobMenu (int param);   // param: 0..7 = SYNTH 1 slider, kSynth2Knob + n = SYNTH 2 knob
+
+    // SYNTH 2: patch bar and knobs
+    bool synth2Mode = false;
+    std::array<std::unique_ptr<PixelKnob>, ft::s2NumParams> knobs;
+    PixelButton patchPrev { "", PixelButton::Style::Raised }, patchNext { "", PixelButton::Style::Raised },
+                patchList { "PATCHES", PixelButton::Style::Raised, 16.0f }, patchSave { "SAVE PATCH", PixelButton::Style::Raised, 16.0f };
+    std::vector<ft::synth2::Patch> patches;
+    juce::Rectangle<int> patchNameBox;
+    struct KnobGroup { juce::String name; juce::Rectangle<int> area; };
+    std::vector<KnobGroup> knobGroups;
+    void choosePatch (int index);
+    int currentPatchIndex() const;
+    void showPatchMenu();
+    void savePatchDialog();
+public:
+    /** Reloads the patch list (factory + the saved patch files). */
+    void refreshPatches();
+    /** Updates the "CC 74" badges on the synth sliders (after MIDI LEARN or a knob move). */
+    void updateKnobBadges();
+private:
+    enum Source { srcIsSample, srcIsSynth, srcIsMidi, srcIsSynth2 };
+    void setSource (int source);
+    void pushSynth();
+    void updateSynthVisibility();
+};
+
+// ===========================================================================
+// RE-SAMPLE: a pattern (or some rows / some tracks of it) becomes a sample
+// ===========================================================================
+
+class ResampleDialog : public juce::Component
+{
+public:
+    explicit ResampleDialog (EditorState& s);
+    /** Shows the dialog for the slot selected now. */
+    void open();
+    void close();
+    std::function<void()> onDone;           // after a sample was made (the page shows it)
+
+    bool handleKey (const juce::KeyPress&);  // Esc closes, Enter re-samples
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override {}   // clicks next to the panel don't reach the page
+
+    /** For the tests. */
+    FourTrackerProcessor::ResampleRequest request() const;
+    void render();
+    void useBlock();
+
+private:
+    void patternChanged();
+    void updateEnabled();
+    juce::uint32 chosenTracks() const;
+
+    EditorState& st;
+    int slot = 1;
+    ValueBox patternBox { 0, ft::kMaxPatterns - 1, 0, 22.0f }, fromBox { 0, 255, 0, 22.0f }, toBox { 0, 255, 63, 22.0f };
+    SegmentPair range { "WHOLE PATTERN", "ROWS", 16.0f }, trackMode { "ALL TRACKS", "CHOOSE TRACKS", 16.0f };
+    PixelButton blockBtn { "USE BLOCK", PixelButton::Style::Raised, 16.0f };
+    std::array<std::unique_ptr<PixelButton>, ft::kNumChannels> trackButtons;
+    PixelButton loopBtn { "LOOP", PixelButton::Style::Segment, 16.0f }, cutBtn { "CUT", PixelButton::Style::Segment, 16.0f },
+                ringBtn { "RING OUT", PixelButton::Style::Segment, 16.0f }, normBtn { "NORMALIZE", PixelButton::Style::Segment, 16.0f };
+    PixelButton goBtn { "RE-SAMPLE", PixelButton::Style::Dark, 20.0f }, cancelBtn { "CANCEL", PixelButton::Style::Raised, 18.0f };
+    juce::Rectangle<int> panel;
+};
+
+/** The offset codes of one sample as a small picture in its own window: POP OUT on the
+    offset calculator. It stays on top (drag it to the side) while you write the beat. */
+class OffsetChart : public juce::Component
+{
+public:
+    OffsetChart (const juce::String& title, int steps, std::vector<int> codes);
+    void paint (juce::Graphics&) override;
+    int columns() const noexcept { return steps <= 16 ? 4 : 8; }
+    juce::String title;
+    int steps;
+    std::vector<int> codes;     // -1: past 09FF
+};
+
+/** OFFSET CALCULATOR on Sample Edit: splits the sample (START..END) into 4 - 64 equal steps
+    (a 1 bar 4/4 breakbeat = 16 steps) and shows the 09xx code that starts a note on each step.
+    Click a step to hear it from there; WRITE puts C-4 + the slot + 09xx at the pattern cursor. */
+class OffsetCalculator : public juce::Component
+{
+public:
+    OffsetCalculator (EditorState& s, WaveformView& w);
+    void open();
+    void close();
+    bool handleKey (const juce::KeyPress&);   // arrows choose, Space plays, Enter writes, Esc closes
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void sampleChanged();                     // the slot or its points changed
+
+    /** The 09xx parameter for a step (0-based), or -1 when 09FF can't reach it. */
+    static int codeFor (int step, int steps, int length);
+    int  getSteps() const noexcept { return steps; }
+    void setSteps (int n);
+    int  getSelected() const noexcept { return selected; }
+    void select (int step, bool play);
+    void writeAtCursor();
+    std::function<void()> onClose;
+    void popOut();                            // the codes as a picture in a window of their own
+    std::unique_ptr<OffsetChart> makeChart() const;   // what POP OUT shows (null without a sample)
+    juce::OwnedArray<juce::DocumentWindow> chartWindows;   // public for the tests
+
+private:
+    int length() const;                       // START..END in frames (what 09xx counts in)
+    juce::Rectangle<int> cellBounds (int i) const;
+    void updateGrid();
+
+    EditorState& st;
+    WaveformView& wave;
+    int steps = 16, selected = 0;
+    std::array<std::unique_ptr<PixelButton>, 5> stepButtons;
+    PixelButton playBtn { "PLAY STEP", PixelButton::Style::Raised, 16.0f }, writeBtn { "WRITE AT CURSOR", PixelButton::Style::Dark, 16.0f },
+                closeBtn { "CLOSE", PixelButton::Style::Raised, 16.0f },
+                popBtn { "POP OUT", PixelButton::Style::Raised, 16.0f };
+    juce::Rectangle<int> gridArea;
+};
+
+// ===========================================================================
+// Sample edit page
+// ===========================================================================
+
+class SampleEditPage : public juce::Component, public Refreshable
+{
+public:
+    explicit SampleEditPage (EditorState& s);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void refresh() override;
+    void instrumentsChanged();
+    void mouseDown (const juce::MouseEvent&) override;
+    void visibilityChanged() override;
+
+    /** Ctrl+A / C / X / V (and Delete) for the waveform, once it has been clicked. */
+    bool handleKey (const juce::KeyPress&);
+
+private:
+    void pushPoints (const ft::InstrumentParams& p);
+    void edit (std::function<bool (ft::Instrument&, int from, int to)> op, bool needsSelection, const juce::String& what);
+    int slot() const { return st.proc.selectedInstrument; }
+
+    EditorState& st;
+    InstrumentList list;
+    PixelLabel numberLabel { "01", 26.0f, juce::Justification::centred };
+    NameBox name { 20.0f };
+    PixelButton prev { "", PixelButton::Style::Raised }, next { "", PixelButton::Style::Raised };
+    PixelButton saveBtn { "SAVE", PixelButton::Style::Raised, 18.0f };
+    std::unique_ptr<juce::FileChooser> chooser;
+    PixelLabel lengthVal { "", 22.0f, juce::Justification::centred }, rateVal { "", 22.0f, juce::Justification::centred },
+               bitsVal { "", 22.0f, juce::Justification::centred }, chansVal { "", 22.0f, juce::Justification::centred };
+    ValueBox curPos { 0, 0, 0, 19.0f };
+    WaveformView wave { true };
+    ValueBox startBox { 0, 0, 0, 19.0f }, endBox { 0, 0, 0, 19.0f }, loopStartBox { 0, 0, 0, 19.0f }, loopEndBox { 0, 0, 0, 19.0f };
+    PixelButton setStart { "SET START", PixelButton::Style::Segment, 17.0f }, setEnd { "SET END", PixelButton::Style::Segment, 17.0f },
+                setLoop { "SET LOOP", PixelButton::Style::Segment, 17.0f }, playLoop { "PLAY LOOP", PixelButton::Style::Dark, 17.0f };
+    SegmentPair loopMode { "FORWARD", "REVERSE", 17.0f };
+    PixelButton cut { "CUT" }, copy { "COPY" }, paste { "PASTE" }, fadeIn { "FADE IN" }, fadeOut { "FADE OUT" },
+                normalize { "NORMALIZE" }, reverseBtn { "REVERSE" }, mix { "MIX" }, resampleBtn { "RE-SAMPLE" }, offsetBtn { "OFFSET" };
+public:
+    ResampleDialog resampler;   // public for the tests
+    OffsetCalculator offsets;
+private:
+    PixelButton zoomIn { "" }, zoomOut { "" }, fit { "FIT", PixelButton::Style::Raised, 18.0f }, left { "" }, right { "" };
+
+    juce::AudioBuffer<float> clip;
+    juce::Rectangle<int> header, infoRow, pointsRow, buttonsRow, editPanel, zoomPanel;
+    std::vector<std::pair<PixelButton*, juce::String>> captions;
+    bool loopPreviewing = false;
+};
